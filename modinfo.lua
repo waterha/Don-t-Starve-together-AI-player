@@ -1,7 +1,7 @@
 name = "AI Players"
 description = "Adds up to five server-controlled AI companions backed by an OpenAI-compatible model API."
 author = "waterha"
-version = "0.1.2"
+version = "0.1.3"
 ai_players_config_ui = true
 forumthread = ""
 api_version = 10

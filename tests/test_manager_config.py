@@ -40,8 +40,12 @@ class ManagerConfigTest(unittest.TestCase):
         # Mod loading precedes world initialization; TheWorld is deliberately nil.
         run_main((ROOT / "modmain.lua").read_text(encoding="utf-8"))
         lua.execute('''
+            AllPlayers = {{userid="fixture-human", IsValid=function() return true end,
+                HasTag=function() return false end, Transform={}}}
             TheWorld = {
-                ismastersim = true,
+                ismastersim = true, ismastershard = true,
+                ListenForEvent = function() end,
+                DoTaskInTime = function(self, delay, callback) callback() end,
                 DoPeriodicTask = function(self, delay, callback) interval = delay end,
             }
             on_sim_init()

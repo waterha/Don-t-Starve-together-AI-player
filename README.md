@@ -10,13 +10,16 @@ This repository contains a server-authoritative prototype Mod that can spawn up 
 4. Edit **API base URL** and **Model** to match your OpenAI-compatible provider.
 5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible key count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible key fields.
 
+6. Start the API bridge on the computer running the world server. On Windows, double-click `tools/start_ai_bridge.cmd` and keep its console open; it needs Python 3 and no extra packages. Alternatively run `python tools/ai_http_bridge.py` (`python3` on Linux). It listens only at `http://127.0.0.1:17893`; check `http://127.0.0.1:17893/health` for `{"ok":true}`. A remote dedicated server needs its own bridge on that server.
+7. Enable **AI Players** in the world's **server mods**, start/resume the world, and enter with your character. Configured companions appear beside the first living human after entry, announce themselves, and follow locally. Loading only **AI Players Config** enables editing but does not spawn companions.
+
 The helper initializes the configuration UI in the frontend; a disabled server mod does not run its own frontend entry when its settings are opened. The helper also opens AI Players settings with the host configuration so changes from Installed Mods reach the server instead of going into a separate client-only configuration. Other mods retain their normal behavior. The main server mod must still be enabled for the hosted world to spawn companions. Dedicated servers can use the override example below without installing the client helper.
 
 **Request interval** is the delay in seconds between scheduled model calls for each AI (15, 30, or 60; default 30). At 30 seconds, five configured AIs make at most about 10 calls per minute after startup. An AI with a request still in flight skips that tick. This controls decision frequency and API usage, not game frame rate or movement speed.
 
 ## API key storage
 
-Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server makes model requests; the mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
+Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server sends each request and key to its loopback bridge, which forwards the key only as Authorization to your configured API URL. The bridge logs no request bodies or credentials. The mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
 
 ## Server setup
 
@@ -25,12 +28,14 @@ Keys are masked on screen but saved as normal DST configuration strings, without
 3. Set `ai_count` between `0` and `5`.
 4. Fill the corresponding API keys. A key can be repeated for multiple AI players.
 5. Set `api_base_url` and `model` if your provider is OpenAI-compatible.
+6. Start `python tools/ai_http_bridge.py` on this server before entering the world.
 
 Example `modoverrides.lua` entry:
 
 ```lua
 return {
-    ["workshop-0000000000"] = {
+    ["ai_players"] = {
+        enabled = true,
         configuration_options = {
             ai_count = 2,
             ai_1_api_key = "REPLACE_WITH_SERVER_SECRET_1",
@@ -46,15 +51,18 @@ return {
 }
 ```
 
-Replace the key in the example with the actual Workshop ID after publishing. For a local Mod, use the local Mod folder name supported by the server configuration.
+Use your actual local mod folder name as the entry key. After publishing to Workshop, replace it with `workshop-` followed by the actual Workshop ID.
 
 ## Current prototype behavior
 
 - Server reads and clamps the requested count to 0-5.
-- Each configured AI attempts to spawn a Wilson-based companion near the first human player.
-- Every companion periodically sends a small world-state summary to the configured model.
-- The model must return JSON with one action: `follow`, `wander`, `say`, `attack`, `gather`, or `wait`.
-- Invalid responses and HTTP failures are logged and do not stop the world simulation.
+- The surface server waits for a living human to enter, then spawns the configured Wilson-based companions nearby. Cave shards do not create a duplicate group. Companions are recreated per world session rather than saved as orphan player entities.
+- They are physical server-controlled companions, not separate Steam/WeGame clients. They do not join the network player roster or consume authenticated player accounts. They do not migrate with you into caves.
+- Local follow updates run every second, independently of the model interval. If the model request fails or times out, companions return to local follow.
+- Every companion periodically sends position, phase and nearby prefab names to the configured model through the local bridge. The bridge adds the API's Authorization header; native DST POST uses the demonstrated four-argument `QueryServer` form.
+- The model returns JSON with one action: `follow`, `wander`, `say`, `attack`, `gather`, or `wait`. Gathering dispatches PICK for ready plants or PICKUP for loose items. This does not implement full autonomous survival, crafting, tool use or base building.
+- The bridge accepts a provider root, `/v1` prefix or full `/chat/completions` endpoint. A root URL gains `/v1/chat/completions`; other API prefixes gain `/chat/completions`.
+- Invalid responses and HTTP failures are logged without stopping simulation. In-flight requests time out so later requests are not blocked indefinitely.
 - Requests are scheduled at the configured interval, with a minimum of 15 seconds.
 
 This is an early implementation. DST's player prefab and HTTP callback behavior vary between game builds, so test it on a dedicated server and inspect `server_log.txt` before using it in an existing world.

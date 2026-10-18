@@ -11,6 +11,15 @@ ROOT = Path(__file__).resolve().parents[1]
 ARCHIVE = Path(os.environ.get('DST_SCRIPTS_ZIP', r'E:\WeGameApps\rail_apps\饥荒：联机版(2000004)\data\databundles\scripts.zip'))
 
 
+def installed_native_callback():
+    with zipfile.ZipFile(ARCHIVE) as archive:
+        source = archive.read('scripts/networking.lua').decode('utf-8-sig')
+    match = re.search(r'^function Networking_Say\(guid, userid, name, prefab, message, colour, whisper, isemote, user_vanity\).*?^end\s*$', source, re.M | re.S)
+    if match is None:
+        raise AssertionError('Installed native signature changed')
+    return match.group(0)
+
+
 class ChatTransportTest(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime(unpack_returned_tuples=True)
@@ -94,10 +103,7 @@ class ChatTransportTest(unittest.TestCase):
 
     @unittest.skipUnless(ARCHIVE.is_file(), 'Installed DST scripts.zip unavailable')
     def test_actual_native_callback_contract(self):
-        with zipfile.ZipFile(ARCHIVE) as archive:
-            source = archive.read('scripts/networking.lua').decode('utf-8-sig')
-        match = re.search(r'^function Networking_Say\(guid, userid, name, prefab, message, colour, whisper, isemote, user_vanity\).*?^end\s*$', source, re.M | re.S)
-        self.assertIsNotNone(match, 'Installed native signature changed')
+        source = installed_native_callback()
         self.lua.execute('''
             bubbles,history,netids=0,0,0
             Ents={[71]={components={talker={Say=function(self,...)
@@ -109,7 +115,7 @@ class ChatTransportTest(unittest.TestCase):
             end}
             TEXT_FILTER_CTX_CHAT='CHAT'
         ''')
-        self.lua.execute(match.group(0))
+        self.lua.execute(source)
         self.lua.execute('''
             Chat.Register(manager)
             local colour,vanity={},{}

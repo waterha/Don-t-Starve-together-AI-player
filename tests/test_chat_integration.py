@@ -1,6 +1,7 @@
 """Wire real dialogue state into manager routing, model requests and action guards."""
 import unittest
 from tests import test_companion_actions as fixture_module
+from tests.test_chat_transport import ARCHIVE, installed_native_callback
 
 
 class ChatIntegrationTest(unittest.TestCase):
@@ -17,6 +18,118 @@ class ChatIntegrationTest(unittest.TestCase):
             json.decode=function() return response end
             response={action='say',message='你好，我正在找金子。'}
             Dialogue=require('ai_dialogue')
+        ''')
+
+    def _install_native_chat(self, source=None):
+        self.lua.execute('''
+            TheWorld.ismastersim,TheWorld.ismastershard=true,true
+            MAX_CHAT_INPUT_LENGTH=150
+            function string:utf8len()
+                local _,count=self:gsub('[^\\128-\\191]','')
+                return count
+            end
+            native_spoken,history,public={},{},{}
+            human.GUID=71
+            human.components.talker={Say=function(self,text)
+                native_spoken[#native_spoken+1]=text
+            end}
+            Ents={[human.GUID]=human}
+            TheNet={GetNetIdForUser=function(self,userid) return 'net:'..userid end,
+                SystemMessage=function(self,text) public[#public+1]=text end}
+            ChatHistory={OnSay=function(self,...)
+                history[#history+1]={n=select('#',...),...}
+            end}
+            TEXT_FILTER_CTX_CHAT='CHAT'
+            function Networking_Say(guid,userid,name,prefab,message,colour,whisper,isemote,user_vanity)
+                if message and message:utf8len()>MAX_CHAT_INPUT_LENGTH then return end
+                local netid=TheNet:GetNetIdForUser(userid)
+                local entity=Ents[guid]
+                if not isemote and entity and entity.components.talker then
+                    entity.components.talker:Say(message,nil,nil,nil,true,colour,TEXT_FILTER_CTX_CHAT,netid)
+                end
+                if message then
+                    ChatHistory:OnSay(guid,userid,netid,name,prefab,message,colour,whisper,isemote,user_vanity)
+                end
+            end
+        ''')
+        if source is not None:
+            self.lua.execute(source)
+        self.lua.execute("assert(require('ai_chat').Register(manager))")
+
+    def _assert_native_public_chat_reply(self):
+        self.lua.execute('''
+            local far=entity(500,0,500,'',{ai_player=true})
+            far._ai_index,far.name=2,'Far'
+            manager.players={far,companion}
+            companion.components.locomotor.bufferedaction={work=true}
+            local colour,vanity={},{}
+            Networking_Say(human.GUID,human.userid,'Player','wilson','hello there',colour,false,false,vanity)
+            assert(#native_spoken==1 and native_spoken[1]=='hello there')
+            assert(#history==1 and history[1].n==10)
+            assert(history[1][2]==human.userid and history[1][6]=='hello there')
+            assert(history[1][7]==colour and history[1][10]==vanity)
+            assert(Dialogue.Observe(companion,clock).pending_message.text=='hello there',
+                'ordinary native chat must queue on nearest real managed bot without a mention')
+            assert(not Dialogue.Observe(far,clock).pending_message)
+            manager:UpdateLocal(companion)
+            assert(#requests==1 and captured[1].conversation.pending_message.text=='hello there')
+            requests[1]('{}',nil)
+            assert(#spoken==1 and spoken[1]==response.message)
+            assert(#public==1 and public[1]=='[AI '..companion.name..'] '..response.message)
+            assert(not Dialogue.Observe(companion,clock).pending_message)
+            assert(not stopped and companion.components.locomotor.bufferedaction.work)
+        ''')
+
+    def test_native_call_pattern_ordinary_chat_queues_and_publicly_replies(self):
+        self._install_native_chat()
+        self._assert_native_public_chat_reply()
+
+    @unittest.skipUnless(ARCHIVE.is_file(), 'Installed DST scripts.zip unavailable')
+    def test_installed_native_ordinary_chat_queues_and_publicly_replies(self):
+        self._install_native_chat(installed_native_callback())
+        self._assert_native_public_chat_reply()
+
+    def test_native_chat_auth_failure_is_visible_throttled_and_recoverable(self):
+        self._install_native_chat()
+        self.lua.execute('''
+            companion.components.locomotor.bufferedaction={work=true}
+            Networking_Say(human.GUID,human.userid,'Player','wilson','hello there',{},false,false,{})
+            manager:UpdateLocal(companion)
+            assert(#requests==1)
+            requests[1](nil,'upstream returned HTTP 401')
+            assert(#spoken==1 and #public==1,'authentication failure must be visible in bubble and public chat')
+            assert(spoken[1]:find('Key',1,true) and spoken[1]:find('离线',1,true))
+            assert(public[1]=='[AI '..companion.name..'] '..spoken[1])
+            assert(Dialogue.Observe(companion,clock).pending_message.text=='hello there')
+            clock=8
+            manager:UpdateLocal(companion)
+            assert(#requests==2)
+            requests[2](nil,'upstream returned HTTP 401')
+            assert(#spoken==1 and #public==1,'authentication notices must be rate limited')
+            assert(Dialogue.Observe(companion,clock).pending_message)
+            clock=60
+            manager:UpdateLocal(companion)
+            assert(#requests==3)
+            requests[3](nil,'upstream returned HTTP 401')
+            assert(#spoken==2 and #public==2)
+            clock=68
+            manager:UpdateLocal(companion)
+            assert(#requests==4)
+            requests[4]('{}',nil)
+            assert(#spoken==3 and spoken[3]==response.message)
+            assert(#public==3 and public[3]=='[AI '..companion.name..'] '..response.message)
+            assert(not Dialogue.Observe(companion,clock).pending_message)
+        ''')
+
+    def test_non_auth_network_failure_does_not_publish_auth_notice(self):
+        self._install_native_chat()
+        self.lua.execute('''
+            companion.components.locomotor.bufferedaction={work=true}
+            Networking_Say(human.GUID,human.userid,'Player','wilson','hello there',{},false,false,{})
+            manager:UpdateLocal(companion)
+            requests[1](nil,'network fixture error')
+            assert(#spoken==0 and #public==0)
+            assert(Dialogue.Observe(companion,clock).pending_message)
         ''')
 
     def test_public_human_chat_routes_and_answers_without_stopping_work(self):

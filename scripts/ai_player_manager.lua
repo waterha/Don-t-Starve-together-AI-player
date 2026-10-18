@@ -74,6 +74,14 @@ local function speak(inst, message)
     Chat.Say(inst, message)
 end
 
+local function auth_notice(inst, err)
+    if err ~= "upstream returned HTTP 401" and err ~= "invalid api_key" then return end
+    local now = GetTime()
+    if inst._ai_auth_notice_at and now - inst._ai_auth_notice_at < 60 then return end
+    inst._ai_auth_notice_at = now
+    speak(inst, "接口鉴权失败（401 / Key 无效），模型离线。请检查 API Key；当前只运行本地生存，角色可能是回退选择。")
+end
+
 local function nearby(inst)
     local x, y, z = inst.Transform:GetWorldPosition()
     return TheSim:FindEntities(x, y, z, 12, nil, { "INLIMBO", "FX", "DECOR" })
@@ -234,6 +242,7 @@ function AIPlayerManager:BeginSelection(index)
             return
         end
         self:SpawnOne(index, self.keys[index], find_human(), selected)
+        if self.by_index[index] then auth_notice(self.by_index[index], err) end
     end
     timeout = TheWorld:DoTaskInTime(60, function() finish(nil, "selection timed out") end)
     slot.provider:Complete({
@@ -459,6 +468,7 @@ function AIPlayerManager:Think(inst)
         if err then
             Dialogue.End(inst, dialogue_token, nil, observation, GetTime())
             inst._ai_mode = "autonomous"
+            if observation.conversation.pending_message then auth_notice(inst, err) end
             print(string.format("[AI Players] AI %d request failed: %s", inst._ai_index, err))
             return
         end

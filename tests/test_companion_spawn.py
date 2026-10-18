@@ -93,6 +93,19 @@ class BotLifecycleTest(unittest.TestCase):
         lua.execute('manager=Manager.new(function(name) return config[name] end); manager:Start()')
         return lua
 
+    def test_auth_failure_explains_fallback_in_public_chat(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            notices={}
+            TheNet={SystemMessage=function(self,text) notices[#notices+1]=text end}
+            advance(2)
+            requests[1].callback(nil,'upstream returned HTTP 401')
+            assert(spawned[1].prefab=='wilson')
+            assert(#notices==1 and notices[1]:find('401',1,true))
+            assert(notices[1]:find('Key',1,true) and not notices[1]:find('fixture-key',1,true))
+            assert(notices[1]:find('模型',1,true))
+        ''')
+
     def test_selection_diagnostics_distinguish_failure_without_exposing_values(self):
         cases = (
             (None, 'invalid api_key', 'invalid api_key'),

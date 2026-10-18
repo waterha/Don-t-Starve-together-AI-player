@@ -107,7 +107,10 @@ class SurvivalTest(unittest.TestCase):
             end}
             TheWorld={state={phase='day'},Map={IsPassableAtPoint=function() return true end,
                 IsGroundTargetBlocked=function() return false end}}
-            bot.LightWatcher={GetLightValue=function() return lightvalue or 0 end}
+            bot.LightWatcher={GetLightValue=function()
+                if lightvalue~=nil then return lightvalue end
+                return TheWorld.state.phase=='night' and 0 or 1
+            end}
         ''')
         self.lua.globals().Survival = self.lua.execute(
             (ROOT / 'scripts/ai_survival.lua').read_text(encoding='utf-8'))
@@ -171,9 +174,9 @@ class SurvivalTest(unittest.TestCase):
             assert(not Survival.Apply(bot,{action='craft',recipe='torch'}))
         ''')
 
-    def test_dusk_equips_torch_and_rejects_empty_or_restricted_items(self):
+    def test_dark_night_equips_torch_and_rejects_empty_or_restricted_items(self):
         self.run_lua('''
-            TheWorld.state.phase='dusk'
+            TheWorld.state.phase='night'
             local torch=equipment('torch'); owned={torch}
             assert(Survival.Tick(bot)); assert(equipped.hands==torch)
             assert(not Survival.Tick(bot))
@@ -364,12 +367,12 @@ class SurvivalTest(unittest.TestCase):
                     else assert(not dispatched and #pushed==0) end
                 else
                     TheWorld.state.phase=reason
-                    if reason=='dusk' then owned={axe,equipment('torch')} end
+                    if reason=='dusk' then owned={axe,equipment('torch')}; lightvalue=0 end
                     local dispatched=Survival.Tick(bot)
                     if reason=='dusk' then assert(dispatched and equipped.hands.prefab=='torch')
                     else assert(not dispatched and #pushed==0) end
                 end
-                reset(); TheWorld.state.phase='day'; found={tree}; equipped.hands=axe
+                reset(); TheWorld.state.phase='day'; lightvalue=nil; found={tree}; equipped.hands=axe
                 assert(not Survival.Tick(bot), 'survival override must cancel work intent')
             end
         ''')

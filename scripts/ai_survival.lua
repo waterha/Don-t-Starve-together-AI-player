@@ -103,7 +103,26 @@ local function crafting_allowed(inst, builder)
         and inventory:IsOpenedBy(inst)
 end
 
+local function light(inst)
+    local phase = TheWorld.state ~= nil and TheWorld.state.phase or "unknown"
+    local watcher = inst.LightWatcher
+    local value = watcher ~= nil and watcher:GetLightValue() or nil
+    local hand = inst.components.inventory ~= nil and inst.components.inventory:GetEquippedItem(EQUIPSLOTS.HANDS) or nil
+    local in_light
+    if watcher ~= nil and watcher.IsInLight ~= nil then in_light = watcher:IsInLight()
+    else in_light = value ~= nil and value > .075
+        or value == nil and (phase == "day" or phase == "dusk") end
+    return {phase = phase, value = value, in_light = in_light,
+        torch_equipped = hand ~= nil and hand.prefab == "torch" and usable_equipment(inst, hand) or false}
+end
+
+local function needs_torch(inst)
+    local illumination = light(inst)
+    return not illumination.in_light and not illumination.torch_equipped
+end
+
 local function craft(inst, name)
+    if name == "torch" and (not needs_torch(inst) or find_item(inst, "torch", usable_equipment)) then return false end
     local builder = inst.components.builder
     local recipe = type(name) == "string" and GetValidRecipe(name) or nil
     if not crafting_allowed(inst, builder) or recipe == nil or recipe.placer ~= nil
@@ -139,6 +158,7 @@ local function build(inst, name)
 end
 
 local function equip(inst, item)
+    if item ~= nil and item.prefab == "torch" and not needs_torch(inst) then return false end
     local inventory = inst.components.inventory
     if inventory == nil or item == nil or not usable_equipment(inst, item) then return false end
     if inventory:GetEquippedItem(item.components.equippable.equipslot) == item then return false end
@@ -148,15 +168,6 @@ end
 local function status(component, current, maximum)
     if component == nil then return {} end
     return {current = component[current], max = component[maximum], percent = component:GetPercent()}
-end
-
-local function light(inst)
-    local phase = TheWorld.state ~= nil and TheWorld.state.phase or "unknown"
-    local watcher = inst.LightWatcher
-    local value = watcher ~= nil and watcher:GetLightValue() or nil
-    local hand = inst.components.inventory ~= nil and inst.components.inventory:GetEquippedItem(EQUIPSLOTS.HANDS) or nil
-    return {phase = phase, value = value, in_light = value ~= nil and value > .075 or phase == "day",
-        torch_equipped = hand ~= nil and hand.prefab == "torch" and usable_equipment(inst, hand) or false}
 end
 
 local function threat(inst, target)
@@ -323,8 +334,7 @@ end
 function Survival.CanDevelop(inst)
     if not valid(inst) or busy(inst) then return false end
     local illumination = light(inst)
-    if (illumination.phase == "night" or TheWorld.state and TheWorld.state.isnight)
-        and not illumination.in_light and not illumination.torch_equipped then return false end
+    if not illumination.in_light and not illumination.torch_equipped then return false end
     local hunger = inst.components.hunger
     if hunger and hunger:GetPercent() < .1 then return false end
     for _, target in ipairs(nearby(inst)) do
@@ -362,15 +372,13 @@ function Survival.Tick(inst, skip_work)
         end
     end
     local illumination = light(inst)
-    local night = illumination.phase == "night" or (TheWorld.state ~= nil and TheWorld.state.isnight)
-    local dusk = illumination.phase == "dusk" or (TheWorld.state ~= nil and TheWorld.state.isdusk)
     local function prepare_light()
         if illumination.torch_equipped then return false end
         local torch = find_item(inst, "torch", usable_equipment)
         if torch ~= nil then return equip(inst, torch) end
         return craft(inst, "torch")
     end
-    if night and not illumination.in_light then
+    if not illumination.in_light then
         inst._ai_survival_work = nil
         if prepare_light() then return true end
     end
@@ -382,10 +390,6 @@ function Survival.Tick(inst, skip_work)
             return push(inst, nil, ACTIONS.EAT, food)
         end
     end
-    if (dusk or night) and prepare_light() then
-        inst._ai_survival_work = nil
-        return true
-    end
     local counts = count_inventory(inst)
     if (counts.cutgrass or 0) < 4 or (counts.twigs or 0) < 4 then
         if gather_for(inst, entities, function(product)
@@ -393,7 +397,7 @@ function Survival.Tick(inst, skip_work)
                 or (product == "twigs" and (counts.twigs or 0) < 4)
         end) then return true end
     end
-    if night and not illumination.in_light and not illumination.torch_equipped then return false end
+    if not illumination.in_light and not illumination.torch_equipped then return false end
     local food_count = 0
     for _, item in ipairs(items(inst)) do
         if edible(inst, item) then food_count = food_count + (item.components.stackable ~= nil and item.components.stackable:StackSize() or 1) end

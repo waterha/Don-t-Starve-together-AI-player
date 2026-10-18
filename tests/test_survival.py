@@ -214,6 +214,162 @@ class SurvivalTest(unittest.TestCase):
             assert(pushed[1].invobject==pick and equipped.hands==pick)
         ''')
 
+    def test_chop_and_mine_continue_only_after_buffered_work_finishes(self):
+        self.run_lua('''
+            for _, work in ipairs({ACTIONS.CHOP,ACTIONS.MINE}) do
+                reset()
+                local target=entity('resource')
+                local remaining=3
+                target.components.workable={CanBeWorked=function() return remaining>0 end,
+                    GetWorkAction=function() return work end}
+                local tool=equipment('tool',work); owned={tool}; found={target}
+                local command=work==ACTIONS.CHOP and 'chop' or 'mine'
+                assert(Survival.Apply(bot,{action=command,target='resource'}))
+                assert(not Survival.Tick(bot) and #pushed==1, 'active work must not be overwritten')
+                assert(not Survival.Apply(bot,{action=command,target='resource'}))
+                for hit=2,3 do
+                    remaining=remaining-1
+                    reset()
+                    assert(Survival.Tick(bot), 'idle bot must continue validated work')
+                    assert(#pushed==1 and pushed[1].target==target)
+                    assert(pushed[1].action==work and pushed[1].invobject==tool)
+                end
+                remaining=0; reset()
+                assert(not Survival.Tick(bot) and #pushed==0, 'depleted target must stop')
+                remaining=3
+                assert(not Survival.Tick(bot), 'depleted intent must not revive')
+            end
+        ''')
+
+    def test_tick_can_defer_work_without_deferring_survival_needs(self):
+        self.run_lua('''
+            local tree=entity('evergreen'); found={tree}
+            tree.components.workable={CanBeWorked=function() return true end,
+                GetWorkAction=function() return ACTIONS.CHOP end}
+            local axe=equipment('axe',ACTIONS.CHOP); owned={axe}
+            assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+            reset()
+            assert(not Survival.Tick(bot,true) and #pushed==0, 'queued commands must get an idle slot')
+            assert(Survival.Tick(bot), 'deferral must preserve work intent')
+            reset(); bot.components.hunger.current=1; owned={axe,food('berries')}
+            assert(Survival.Tick(bot,true) and pushed[1].action==ACTIONS.EAT)
+            reset(); bot.components.hunger.current=100
+            assert(not Survival.Tick(bot), 'urgent eating must cancel work intent')
+        ''')
+
+    def test_continuation_clears_invalid_targets_and_tools_without_reviving(self):
+        self.run_lua('''
+            local cases={
+                function(target,tool) target.removed=true end,
+                function(target,tool) target.components.workable=nil end,
+                function(target,tool) target.tags.fire=true end,
+                function(target,tool) target.x=13 end,
+                function(target,tool) target.components.workable.GetWorkAction=function() return ACTIONS.MINE end end,
+                function(target,tool) tool.removed=true end,
+                function(target,tool) tool.empty=true end,
+                function(target,tool) tool.restricted=true end,
+                function(target,tool) tool.components.finiteuses={GetUses=function() return 0 end} end,
+                function(target,tool) tool.components.tool=nil end,
+                function(target,tool) owned={} end,
+                function(target,tool) equipped.hands=nil end,
+            }
+            for _, invalidate in ipairs(cases) do
+                reset()
+                local tree=entity('evergreen')
+                local workable={CanBeWorked=function() return true end,
+                    GetWorkAction=function() return ACTIONS.CHOP end}
+                tree.components.workable=workable
+                local axe=equipment('axe',ACTIONS.CHOP); owned={axe}; found={tree}
+                assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+                reset(); invalidate(tree,axe)
+                assert(not Survival.Tick(bot) and #pushed==0, 'invalid work must stop')
+                tree.removed=false; tree.tags={}; tree.x=1; tree.components.workable=workable
+                workable.GetWorkAction=function() return ACTIONS.CHOP end
+                axe.removed=false; axe.empty=false; axe.restricted=false; axe.components.finiteuses=nil
+                axe.components.tool={CanDoAction=function(_,action) return action==ACTIONS.CHOP end}
+                owned={axe}; equipped.hands=axe
+                assert(not Survival.Tick(bot), 'cleared intent must not revive')
+            end
+        ''')
+
+    def test_normal_survival_gathering_precedes_then_resumes_work(self):
+        self.run_lua('''
+            local tree=entity('evergreen')
+            tree.components.workable={CanBeWorked=function() return true end,
+                GetWorkAction=function() return ACTIONS.CHOP end}
+            local axe=equipment('axe',ACTIONS.CHOP); owned={axe}; found={tree}
+            assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+            reset(); local grass=plant('grass','cutgrass'); found={tree,grass}
+            assert(Survival.Tick(bot) and pushed[1].target==grass)
+            reset(); grass.picked=true
+            local berries=plant('berrybush','berries'); found={tree,grass,berries}
+            assert(Survival.Tick(bot) and pushed[1].target==berries)
+            reset(); berries.picked=true
+            assert(Survival.Tick(bot) and pushed[1].target==tree)
+        ''')
+
+    def test_explicit_idle_commands_replace_retained_work(self):
+        self.run_lua('''
+            local tree=entity('evergreen')
+            tree.components.workable={CanBeWorked=function() return true end,
+                GetWorkAction=function() return ACTIONS.CHOP end}
+            local rock=entity('rock1')
+            rock.components.workable={CanBeWorked=function() return true end,
+                GetWorkAction=function() return ACTIONS.MINE end}
+            local axe=equipment('axe',ACTIONS.CHOP); local pick=equipment('pickaxe',ACTIONS.MINE)
+            owned={axe,pick}; found={tree,rock}
+            assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+            reset(); assert(Survival.Apply(bot,{action='mine',target='rock1'}))
+            reset(); assert(Survival.Tick(bot) and pushed[1].target==rock)
+            for _, command in ipairs({'gather','eat','craft','equip'}) do
+                reset(); owned={axe,pick}; found={tree,rock}
+                assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+                reset()
+                assert(not Survival.Apply(bot,{action='attack'}))
+                assert(Survival.Tick(bot), 'rejected commands must preserve intent')
+                reset()
+                local grass=plant('grass','cutgrass'); found={tree,grass}
+                local berry=food('berries'); owned={axe,pick,berry}
+                recipes.axe={name='axe',available=true}
+                local action={action=command,target='grass',item='berries'}
+                if command=='craft' then action.recipe='axe' end
+                if command=='equip' then action.item='pickaxe' end
+                assert(Survival.Apply(bot,action))
+                reset(); grass.picked=true
+                if command=='equip' then equipped.hands=axe end
+                assert(not Survival.Tick(bot), 'successful explicit command must clear prior work')
+            end
+        ''')
+
+    def test_danger_and_night_cancel_retained_work(self):
+        self.run_lua('''
+            for _, reason in ipairs({'danger','blocked_escape','night','dusk'}) do
+                reset(); TheWorld.state.phase='day'
+                TheWorld.Map.IsPassableAtPoint=function() return true end
+                local tree=entity('evergreen')
+                tree.components.workable={CanBeWorked=function() return true end,
+                    GetWorkAction=function() return ACTIONS.CHOP end}
+                local axe=equipment('axe',ACTIONS.CHOP); owned={axe}; found={tree}
+                assert(Survival.Apply(bot,{action='chop',target='evergreen'}))
+                reset()
+                if reason=='danger' or reason=='blocked_escape' then
+                    local hound=entity('hound',2,0); hound.components.combat={target=bot}; found={tree,hound}
+                    if reason=='blocked_escape' then TheWorld.Map.IsPassableAtPoint=function() return false end end
+                    local dispatched=Survival.Tick(bot)
+                    if reason=='danger' then assert(dispatched and pushed[1].action==ACTIONS.WALKTO)
+                    else assert(not dispatched and #pushed==0) end
+                else
+                    TheWorld.state.phase=reason
+                    if reason=='dusk' then owned={axe,equipment('torch')} end
+                    local dispatched=Survival.Tick(bot)
+                    if reason=='dusk' then assert(dispatched and equipped.hands.prefab=='torch')
+                    else assert(not dispatched and #pushed==0) end
+                end
+                reset(); TheWorld.state.phase='day'; found={tree}; equipped.hands=axe
+                assert(not Survival.Tick(bot), 'survival override must cancel work intent')
+            end
+        ''')
+
     def test_imminent_threat_flees_with_passable_buffered_walk(self):
         self.run_lua('''
             local hound=entity('hound',2,0); hound.components.combat={target=bot}; found={hound}

@@ -88,6 +88,22 @@ class BotLifecycleTest(unittest.TestCase):
         lua.execute('manager=Manager.new(function(name) return config[name] end); manager:Start()')
         return lua
 
+    def test_local_reaction_cadence_is_independent_of_slow_model(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            assert(periodics[.25], "local reaction must be checked within 250ms")
+            assert(periodics[30], "default API usage must not increase")
+            advance(2); requests[1].callback('{"character":"wilson"}',nil)
+            advance(1); assert(#requests==2 and spawned[1]._ai_busy)
+            local updates=0
+            function manager:UpdateLocal(inst) assert(inst==spawned[1]); updates=updates+1 end
+            for i=1,4 do periodics[.25]() end
+            assert(updates==4 and #requests==2, "local loop waited for model or generated extra API calls")
+            config.request_interval=5
+            manager:Start()
+            assert(periodics[5], "fast model setting was clamped back to 15s")
+        ''')
+
     def test_lists_before_selection_then_enters_chosen_character(self):
         lua = self.runtime()
         lua.execute('''

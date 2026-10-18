@@ -135,6 +135,37 @@ class BridgeTest(unittest.TestCase):
         self.assertEqual(self.request(payload)[0], 400)
         self.assertEqual(self.upstream.received, [])
 
+    def test_invalid_fields_are_specific_without_exposing_values(self):
+        cases = (
+            ("base_url", "https://private.example:secret-port/private", "invalid base_url"),
+            ("api_key", "private-key\r\nInjected: private", "invalid api_key"),
+            ("api_key", "private-\u00e9-key", "invalid api_key"),
+            ("model", "   ", "invalid model"),
+            ("messages", "private-message", "invalid messages"),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            for field, value, expected in cases:
+                with self.subTest(field=field):
+                    payload = self.payload()
+                    payload[field] = value
+                    status, body = self.request(payload)
+                    self.assertEqual(status, 400)
+                    self.assertEqual(json.loads(body), {"error": {"message": expected}})
+        self.assertEqual(output.getvalue(), "")
+        self.assertEqual(self.upstream.received, [])
+
+    def test_surrounding_whitespace_is_removed_before_forwarding(self):
+        payload = self.payload()
+        for field in ("base_url", "api_key", "model"):
+            payload[field] = " \t\r\n" + payload[field] + "\r\n\t "
+        status, _ = self.request(payload)
+        self.assertEqual(status, 200)
+        path, headers, forwarded = self.upstream.received[-1]
+        self.assertEqual(path, "/v1/chat/completions")
+        self.assertEqual(headers["Authorization"], "Bearer fixture-key")
+        self.assertEqual(forwarded["model"], "fixture-model")
+
     def test_redirects_are_not_followed(self):
         self.upstream.reply_status = 302
         self.assertEqual(self.request(self.payload())[0], 502)

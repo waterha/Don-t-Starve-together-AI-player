@@ -122,6 +122,27 @@ local function threat(inst, target)
         and not (target.components.health ~= nil and target.components.health:IsDead())
 end
 
+-- Keep entity references only on the bot; observations remain serializable.
+local function work_intent(inst)
+    local intent = inst._ai_survival_work
+    if intent == nil then return nil end
+    local target, tool, work = intent.target, intent.tool, intent.action
+    local workable = valid(target) and target.components.workable or nil
+    local inventory = inst.components.inventory
+    if workable == nil or target.Transform == nil
+        or inst:GetDistanceSqToInst(target) > RADIUS * RADIUS
+        or not safe_resource(target) or not workable:CanBeWorked()
+        or workable:GetWorkAction() ~= work or not valid(tool)
+        or not usable_equipment(inst, tool) or tool.components.tool == nil
+        or not tool.components.tool:CanDoAction(work)
+        or find_item(inst, nil, function(_, item) return item == tool end) == nil
+        or inventory:GetEquippedItem(tool.components.equippable.equipslot) ~= tool then
+        inst._ai_survival_work = nil
+        return nil
+    end
+    return intent
+end
+
 function Survival.Observe(inst)
     if not valid(inst) then return {} end
     local observation = {
@@ -162,15 +183,24 @@ function Survival.Observe(inst)
     return observation
 end
 
+local function explicit_override(inst, dispatched)
+    if dispatched then inst._ai_survival_work = nil end
+    return dispatched
+end
+
 function Survival.Apply(inst, action)
     if not valid(inst) or busy(inst) or type(action) ~= "table" then return false end
     if inst.components.health ~= nil and inst.components.health:IsDead() then return false end
     local name = action.action or action.type
-    if name == "craft" then return craft(inst, action.recipe or action.item or action.target) end
-    if name == "equip" then return equip(inst, find_item(inst, action.item or action.target, usable_equipment)) end
+    if name == "craft" then
+        return explicit_override(inst, craft(inst, action.recipe or action.item or action.target))
+    end
+    if name == "equip" then
+        return explicit_override(inst, equip(inst, find_item(inst, action.item or action.target, usable_equipment)))
+    end
     if name == "eat" then
         local item = find_item(inst, action.item or action.target, edible)
-        return item ~= nil and push(inst, nil, ACTIONS.EAT, item) or false
+        return explicit_override(inst, item ~= nil and push(inst, nil, ACTIONS.EAT, item) or false)
     end
     if name ~= "gather" and name ~= "pick" and name ~= "pickup" and name ~= "chop" and name ~= "mine" then return false end
     local requested = action.target_guid or action.target
@@ -181,7 +211,7 @@ function Survival.Apply(inst, action)
                 local game_action = gather_action(inst, target)
                 if game_action ~= nil and (name == "gather" or (name == "pick" and game_action == ACTIONS.PICK)
                     or (name == "pickup" and game_action == ACTIONS.PICKUP)) then
-                    return push(inst, target, game_action)
+                    return explicit_override(inst, push(inst, target, game_action))
                 end
             else
                 local work = name == "chop" and ACTIONS.CHOP or ACTIONS.MINE
@@ -193,7 +223,11 @@ function Survival.Apply(inst, action)
                     if tool ~= nil then
                         local inventory = inst.components.inventory
                         if inventory:GetEquippedItem(tool.components.equippable.equipslot) ~= tool and not equip(inst, tool) then return false end
-                        return push(inst, target, work, tool)
+                        if push(inst, target, work, tool) then
+                            inst._ai_survival_work = {target = target, tool = tool, action = work}
+                            return true
+                        end
+                        return false
                     end
                 end
             end
@@ -214,12 +248,17 @@ local function gather_for(inst, entities, wanted)
     return false
 end
 
-function Survival.Tick(inst)
+function Survival.Tick(inst, skip_work)
     if not valid(inst) or busy(inst) or inst.components.locomotor == nil then return false end
-    if inst.components.health ~= nil and inst.components.health:IsDead() then return false end
+    if inst.components.health ~= nil and inst.components.health:IsDead() then
+        inst._ai_survival_work = nil
+        return false
+    end
+    work_intent(inst)
     local entities = nearby(inst)
     for _, target in ipairs(entities) do
         if threat(inst, target) and inst:GetDistanceSqToInst(target) < 36 then
+            inst._ai_survival_work = nil
             local x, y, z = inst.Transform:GetWorldPosition()
             local tx, _, tz = target.Transform:GetWorldPosition()
             local dx, dz = x - tx, z - tz
@@ -246,13 +285,22 @@ function Survival.Tick(inst)
         if torch ~= nil then return equip(inst, torch) end
         return craft(inst, "torch")
     end
-    if night and not illumination.in_light and prepare_light() then return true end
+    if night and not illumination.in_light then
+        inst._ai_survival_work = nil
+        if prepare_light() then return true end
+    end
     local hunger = inst.components.hunger
     if hunger ~= nil and hunger:GetPercent() < .6 then
         local food = find_item(inst, nil, edible)
-        if food ~= nil then return push(inst, nil, ACTIONS.EAT, food) end
+        if food ~= nil then
+            inst._ai_survival_work = nil
+            return push(inst, nil, ACTIONS.EAT, food)
+        end
     end
-    if (dusk or night) and prepare_light() then return true end
+    if (dusk or night) and prepare_light() then
+        inst._ai_survival_work = nil
+        return true
+    end
     local counts = count_inventory(inst)
     if (counts.cutgrass or 0) < 4 or (counts.twigs or 0) < 4 then
         if gather_for(inst, entities, function(product)
@@ -266,10 +314,15 @@ function Survival.Tick(inst)
         if edible(inst, item) then food_count = food_count + (item.components.stackable ~= nil and item.components.stackable:StackSize() or 1) end
     end
     if food_count < 6 then
-        return gather_for(inst, entities, function(product, target)
+        if gather_for(inst, entities, function(product, target)
             return (target.components.edible ~= nil and edible(inst, target))
                 or product == "berries" or product == "berries_juicy" or product == "carrot"
-        end)
+        end) then return true end
+    end
+    local intent = not skip_work and work_intent(inst) or nil
+    if intent ~= nil then
+        if push(inst, intent.target, intent.action, intent.tool) then return true end
+        inst._ai_survival_work = nil
     end
     return false
 end

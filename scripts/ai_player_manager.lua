@@ -201,6 +201,15 @@ end
 function AIPlayerManager:ApplyAction(inst, action)
     if not alive(inst) or type(action) ~= "table" then return end
     local name = action.action or "wait"
+    if name ~= "say" and not available(inst) then
+        -- An old idle reply must not cancel work begun while HTTP was in flight.
+        if name ~= "wait" and name ~= "wander" then
+            inst._ai_pending_action = { action = action, expires = GetTime() + 10 }
+        end
+        return
+    end
+    if name ~= "say" then inst._ai_pending_action = nil end
+    if name == "wait" or name == "wander" or name == "follow" then inst._ai_survival_work = nil end
     if name == "say" then say(inst, action.message)
     elseif name == "follow" then inst._ai_mode = "follow"; self:Follow(inst)
     elseif name == "wander" then inst._ai_mode = "autonomous"; self:Wander(inst)
@@ -212,7 +221,7 @@ function AIPlayerManager:ApplyAction(inst, action)
         for _, target in ipairs(nearby(inst)) do
             if (target.prefab == action.target or target.GUID == tonumber(action.target))
                 and target ~= inst and not target:HasTag("player") and target.components.combat then
-                inst._ai_mode = "autonomous"
+                inst._ai_mode, inst._ai_survival_work = "autonomous", nil
                 inst.components.locomotor:PushAction(BufferedAction(inst, target, ACTIONS.ATTACK), true)
                 break
             end
@@ -250,6 +259,30 @@ function AIPlayerManager:Think(inst)
         { role = "user", content = json.encode(observation) } }, finish)
 end
 
+function AIPlayerManager:UpdateLocal(inst)
+    if not alive(inst) then return end
+    -- Survival retains priority over delayed model instructions.
+    if Survival.Tick(inst, inst._ai_pending_action ~= nil) then return end
+    if not available(inst) then return end
+    local pending = inst._ai_pending_action
+    if pending then
+        inst._ai_pending_action = nil
+        if GetTime() <= pending.expires then
+            self:ApplyAction(inst, pending.action)
+            return
+        end
+    end
+    if inst._ai_mode == "follow" then
+        if not inst._ai_next_follow or GetTime() >= inst._ai_next_follow then
+            inst._ai_next_follow = GetTime() + .5
+            self:Follow(inst)
+        end
+    elseif not inst._ai_next_wander or GetTime() >= inst._ai_next_wander then
+        inst._ai_next_wander = GetTime() + 2
+        self:Wander(inst)
+    end
+end
+
 function AIPlayerManager:Start()
     if TheWorld.ismastershard == false then return end
     self.count = math.max(0, math.min(MAX_PLAYERS, math.floor(tonumber(safe_config(self, "ai_count", 0)) or 0)))
@@ -265,21 +298,10 @@ function AIPlayerManager:Start()
     end)
     -- Covers enabling the mod on an existing save and a human already present at startup.
     TheWorld:DoTaskInTime(1, function() self:EnsureCompanions() end)
-    TheWorld:DoPeriodicTask(2, function()
-        for _, inst in ipairs(self.players) do
-            if alive(inst) then
-                local acted = Survival.Tick(inst)
-                if not acted and available(inst) then
-                    if inst._ai_mode == "follow" then self:Follow(inst)
-                    elseif not inst._ai_next_wander or GetTime() >= inst._ai_next_wander then
-                        inst._ai_next_wander = GetTime() + 8
-                        self:Wander(inst)
-                    end
-                end
-            end
-        end
+    TheWorld:DoPeriodicTask(.25, function()
+        for _, inst in ipairs(self.players) do self:UpdateLocal(inst) end
     end)
-    local interval = math.max(15, tonumber(safe_config(self, "request_interval", 30)) or 30)
+    local interval = math.max(5, tonumber(safe_config(self, "request_interval", 30)) or 30)
     TheWorld:DoPeriodicTask(interval, function()
         for _, inst in ipairs(self.players) do if alive(inst) then self:Think(inst) end end
     end)

@@ -31,6 +31,10 @@ def completion_url(base_url):
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
+class InvalidField(ValueError):
+    """A validation error containing only a fixed field name."""
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         # Do not forward credentials to a redirected host.
@@ -85,18 +89,27 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = json.loads(raw)
             if not isinstance(data, dict):
                 raise ValueError("invalid request")
-            url = completion_url(data.get("base_url"))
+            try:
+                url = completion_url(data.get("base_url"))
+            except (ValueError, TypeError, UnicodeError):
+                raise InvalidField("invalid base_url") from None
             api_key = data.get("api_key")
-            if (not isinstance(api_key, str) or not api_key.strip()
+            if isinstance(api_key, str):
+                api_key = api_key.strip()
+            if (not isinstance(api_key, str) or not api_key
                     or any(ord(char) < 32 or ord(char) > 126 for char in api_key)):
-                raise ValueError("invalid key")
+                raise InvalidField("invalid api_key")
             if not isinstance(data.get("model"), str) or not data["model"].strip():
-                raise ValueError("invalid model")
+                raise InvalidField("invalid model")
             if not isinstance(data.get("messages"), list):
-                raise ValueError("invalid messages")
+                raise InvalidField("invalid messages")
             payload = {key: value for key, value in data.items()
                        if key in ("model", "messages", "temperature", "max_tokens", "response_format")}
+            payload["model"] = payload["model"].strip()
             encoded = json.dumps(payload, allow_nan=False).encode("utf-8")
+        except InvalidField as error:
+            self._error(400, str(error))
+            return
         except (ValueError, TypeError, UnicodeError):
             self._error(400, "invalid completion request")
             return

@@ -13,6 +13,8 @@ class CompanionActionsTest(unittest.TestCase):
         self.lua.execute('''
             requests, tasks, found, moves, pushed, spoken = {}, {}, {}, {}, {}, {}
             decode_count = 0
+            clock = 0
+            function GetTime() return clock end
             package.preload.ai_provider = function() return {} end
             package.preload.ai_players_roster = function() return {Publish=function() end} end
             package.preload.ai_survival = function() return {
@@ -146,6 +148,44 @@ class CompanionActionsTest(unittest.TestCase):
             manager:ApplyAction(companion, {action="attack", target="42"})
             assert(#pushed==1 and pushed[1].target==monster)
             assert(find_calls and find_calls>=2)
+        ''')
+
+    def test_busy_model_action_is_retained_until_actor_is_available(self):
+        self.lua.execute('''
+            companion.components.locomotor.bufferedaction={work=true}
+            manager:ApplyAction(companion, {action="gather", target="twigs"})
+            assert(companion._ai_pending_action, "busy actor discarded model decision")
+            assert(not survival_action)
+            companion.components.locomotor.bufferedaction=nil
+            manager:UpdateLocal(companion)
+            assert(survival_action and survival_action.target=="twigs")
+            assert(not companion._ai_pending_action)
+        ''')
+
+    def test_wait_response_does_not_interrupt_in_progress_work(self):
+        self.lua.execute('''
+            companion.components.locomotor.bufferedaction={work=true}
+            manager:ApplyAction(companion, {action="wait"})
+            assert(not stopped, "delayed wait response interrupted ongoing work")
+        ''')
+
+    def test_explicit_mode_change_clears_old_continuous_work(self):
+        self.lua.execute('''
+            for _, name in ipairs({"follow", "wander", "wait"}) do
+                companion._ai_survival_work={target="old-tree"}
+                manager:ApplyAction(companion, {action=name})
+                assert(not companion._ai_survival_work)
+            end
+        ''')
+
+    def test_expired_pending_action_is_discarded(self):
+        self.lua.execute('''
+            companion.components.locomotor.bufferedaction={work=true}
+            manager:ApplyAction(companion, {action="gather", target="twigs"})
+            clock=11
+            companion.components.locomotor.bufferedaction=nil
+            manager:UpdateLocal(companion)
+            assert(not survival_action and not companion._ai_pending_action)
         ''')
 
     def test_timeout_releases_busy_and_late_callback_cannot_affect_next_request(self):

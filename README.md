@@ -1,42 +1,47 @@
-# AI Players for Don't Starve Together
+# 饥荒：联机版 AI 玩家
 
-This server-authoritative mod adds up to five AI bots. When a human enters a new world or resumes an existing save with the mod enabled, bots appear as **[AI]** entries in the in-game player list, choose their own character through the configured model, enter the world and run basic autonomous survival actions. Each bot has its own API URL, API key and model name, so different providers can be used together; repeated keys are supported.
+**简体中文** | [English](README.en.md)
 
-These are mod-controlled bots. Their rows extend the in-game list; they are not separate Steam/WeGame connections, do not occupy authenticated client slots, and do not appear as connections in the external server browser.
+这是一个由服务器控制的 AI 玩家模组，支持同时启用 0–5 个机器人。在新世界或已启用模组的旧存档中，真人进入后，机器人会先以 **[AI]** 条目出现在游戏内玩家列表，自行通过模型选择角色，再进入世界执行基础自主生存动作。每个 AI 都有独立的 API 地址、API Key 和模型名称，可以混用不同服务商，也可以重复使用同一个 Key。
 
-## Configure in game
+这些是模组控制的机器人，玩家列表由模组扩展。它们不是独立的 Steam/WeGame 网络客户端，不占用经过身份认证的客户端席位，也不会作为连接出现在外部服务器浏览器中。
 
-1. Install the main mod as usual. For editable settings in the **Installed Mods** menu before the server mod is enabled, copy the contents of `client_config_helper` to a separate sibling folder, `mods/ai_players_config`, enable **AI Players Config** as a client mod, and restart once. The helper must be a separate mod, not a nested folder inside AI Players. Local development installs may instead add `ForceEnableMod("ai_players_config")` to the game's `mods/modsettings.lua`; remove that line to stop automatically loading the helper.
-2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many groups appear, each with **AI N API URL**, **AI N API key** and **AI N Model**; at zero, no provider fields appear.
-3. Fill each AI's URL, key and model separately. For example, AI 1 can use a relay's URL/key/model while AI 2 uses `https://api.openai.com/v1`, its OpenAI key and `gpt-4o-mini`. Both endpoints must support OpenAI-compatible chat completions. Only keys are masked; URL and model text remain visible. Reducing the count hides unused groups and preserves all three values for reuse.
-4. Blank URL/model fields fall back to the old shared settings for upgraded saves, or `https://api.openai.com/v1` and `gpt-4o-mini` for a fresh setup. Explicit per-AI values always take precedence; one AI's values never become another AI's defaults. The former shared URL/model rows are hidden.
-5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible group count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible provider fields.
+## 游戏内配置
 
-6. Start the API bridge on the computer running the world server. On Windows, double-click `tools/start_ai_bridge.cmd` and keep its console open; it needs Python 3 and no extra packages. Alternatively run `python tools/ai_http_bridge.py` (`python3` on Linux). It listens only at `http://127.0.0.1:17893`; check `http://127.0.0.1:17893/health` for `{"ok":true}`. A remote dedicated server needs its own bridge on that server.
-7. Enable **AI Players** in the world's **server mods**, start/resume the world, and enter with your character. Open the in-game player list: each configured bot first shows **Selecting**, then its chosen character and **Alive** once it enters nearby. A dead bot shows **Dead**. Bots pursue their own food/material/light needs rather than following by default. Loading only **AI Players Config** enables editing but does not start bots. For an existing save, enable the server mod before resuming; no new world is required.
+1. 安装主模组。若需要在尚未启用服务器模组时，通过“已安装模组”菜单编辑配置，请将 `client_config_helper` 的内容复制到独立的同级目录 `mods/ai_players_config`，启用客户端模组 **AI Players Config**，然后重启一次游戏。配置助手必须是独立模组，不能只是主模组里的子目录。本地开发安装也可在游戏的 `mods/modsettings.lua` 中加入 `ForceEnableMod("ai_players_config")`；删除这一行即可取消自动加载。
+2. 打开 **AI Players** 配置，将 **AI player count** 设为 0–5。界面会显示相同数量的配置组，每组包含 **AI N API URL**、**AI N API key** 和 **AI N Model**；数量为 0 时不显示服务商字段。
+3. 分别填写每个 AI 的地址、Key 和模型。例如，AI 1 可以使用中转服务的地址、Key 和模型，AI 2 使用 `https://api.openai.com/v1`、自己的 OpenAI Key 和 `gpt-4o-mini`。接口须兼容 OpenAI Chat Completions。只有 Key 会遮挡显示，地址和模型保持可见。减少 AI 数量只会隐藏多余配置组，不会清除已填内容。
+4. 地址或模型留空时，升级存档优先使用旧版共享配置；全新配置默认使用 `https://api.openai.com/v1` 和 `gpt-4o-mini`。每个 AI 显式填写的值始终优先，且不会成为其他 AI 的默认值。旧版共享地址、模型字段已隐藏。
+5. 点击 **Apply**，通过游戏原生的主机配置机制保存。重新打开后会保留字段及组数；**Back** 放弃未保存的修改；**Reset** 恢复默认值，包括 AI 数量为 0、隐藏所有服务商字段。
+6. 在运行世界服务器的电脑上启动 API 桥接程序。Windows 可双击 `tools/start_ai_bridge.cmd` 并保持窗口打开；需要 Python 3，无需额外依赖。也可运行 `python tools/ai_http_bridge.py`，Linux 使用 `python3`。桥接仅监听 `http://127.0.0.1:17893`，访问 `http://127.0.0.1:17893/health` 应返回 `{"ok":true}`。远程专用服务器必须在服务器本机启动桥接。
+7. 在世界的“服务器模组”中启用 **AI Players**，创建或继续世界，然后用真人角色进入。打开游戏内玩家列表，各机器人先显示 **Selecting**，选角并在真人附近进入后显示所选角色和 **Alive**，死亡后显示 **Dead**。机器人默认独立处理食物、材料和照明需求，而不是跟随。仅启用配置助手不会启动机器人。旧存档只需在继续游戏前启用服务器模组，无需重新建档。
 
-The helper initializes the configuration UI in the frontend; a disabled server mod does not run its own frontend entry when its settings are opened. The helper also opens AI Players settings with the host configuration so changes from Installed Mods reach the server instead of going into a separate client-only configuration. Other mods retain their normal behavior. The main server mod must still be enabled for the hosted world to spawn companions. Dedicated servers can use the override example below without installing the client helper.
+配置助手负责在前端初始化输入界面：未启用的服务器模组不会因为打开配置页而自动执行自己的前端入口。助手还会使用主机配置打开 AI Players 设置，避免在“已安装模组”中修改的内容被保存到独立的客户端配置。其他模组行为保持不变。世界仍须启用主模组才能生成机器人；专用服务器可直接使用下方配置示例，无需安装客户端助手。
 
-**Request interval** is the delay in seconds between scheduled action decisions for each AI (5, 10, 15, 30, or 60; default 30). At 30 seconds, five active bots make at most about 10 scheduled calls per minute; at 10 seconds about 30, and at 5 seconds about 60. Startup additionally makes one character-selection request and one initial action request per bot. A bot with an action request still in flight skips that tick. The default has not changed: faster local actions do not require more API calls.
+## 反应速度与请求间隔
 
-The local survival loop checks every **0.25 seconds**, independently of HTTP/model requests (previously 2 seconds). This reduces scheduling delay, not animation, pathfinding or provider latency. It resumes validated chopping/mining work between swings without another model request. A model command received while the bot is busy is kept for up to 10 seconds and revalidated when idle, with survival needs taking priority. Delayed wait/wander replies cannot stop existing buffered work. Idle exploration retries every 2 seconds rather than 8; follow updates are limited to twice per second. Actual frame-time and end-to-end latency in a running game have not been measured.
+**Request interval** 是每个 AI 定时请求模型作出动作决策的间隔，单位为秒，可选 5、10、15、30、60，默认 30。五个活跃机器人在 30 秒间隔下，每分钟最多约 10 次定时请求；10 秒间隔约 30 次，5 秒间隔约 60 次。启动时每个机器人还会额外发送一次选角请求和一次初始动作请求。若上一次动作请求尚未完成，会跳过本次定时请求。默认间隔没有缩短，加快本地动作不需要增加 API 调用。
 
-The bridge also reports invalid configuration by field (`invalid base_url`, `invalid api_key`, `invalid model`, or `invalid messages`) without echoing submitted values. Leading/trailing whitespace on URL, key and model is removed; internal key control characters remain rejected. Repeated validation errors mean requests are failing, not merely responding slowly. Check configuration before selecting a shorter interval.
+本地生存循环每 **0.25 秒**检查一次，独立于 HTTP 和模型请求，旧版为 2 秒。这减少的是调度等待，不会缩短动画、寻路或服务商响应时间。砍树、挖矿会在重新验证目标和工具后连续执行，不必每一下都请求模型。忙碌时收到的模型动作最多保留 10 秒，空闲后重新验证，生存需求优先。延迟返回的等待、闲逛指令不会打断已有缓冲动作。空闲探索重试间隔由 8 秒缩短到 2 秒，跟随更新最多每秒两次。尚未在实际游戏中测量帧耗时或端到端响应速度。
 
-## API key storage
+桥接会按字段报告无效配置：`invalid base_url`、`invalid api_key`、`invalid model` 或 `invalid messages`，不会回显提交的值。地址、Key 和模型首尾空白会被去除；Key 内部控制字符仍会被拒绝。反复出现校验错误表示请求失败，不只是响应慢，应先检查配置，再考虑缩短请求间隔。
 
-Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server sends each request and key to its loopback bridge, which forwards the key only as Authorization to your configured API URL. The bridge logs no request bodies or credentials. The mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
+## API Key 存储与安全
 
-## Server setup
+Key 在界面中遮挡显示，但以普通游戏配置字符串保存，本模组不会加密。不要把真实 Key 放进创意工坊上传内容、Git 提交、截图、共享存档或共享配置文件。
 
-1. Copy this Mod directory into the server's `mods` directory.
-2. Enable the Mod in the server's `modoverrides.lua`.
-3. Set `ai_count` between `0` and `5`.
-4. Fill `ai_N_api_base_url`, `ai_N_api_key` and `ai_N_model` for each AI. A key can be repeated for multiple AI players.
-5. Each URL must provide OpenAI-compatible chat completions. Different AIs can use different providers and model names.
-6. Start `python tools/ai_http_bridge.py` on this server before entering the world.
+世界服务器将每次请求及 Key 发送给本机回环桥接；桥接仅通过 Authorization 请求头将 Key 转发到你配置的 API 地址，不记录请求正文或凭据。模组未添加向客户端发送 Key 的 RPC。输入框遮挡不等于配置存储具备保密能力。
 
-Example `modoverrides.lua` entry:
+## 专用服务器配置
+
+1. 将主模组目录复制到服务器的 `mods` 目录。
+2. 在服务器的 `modoverrides.lua` 中启用模组。
+3. 将 `ai_count` 设为 `0`–`5`。
+4. 为每个 AI 填写 `ai_N_api_base_url`、`ai_N_api_key` 和 `ai_N_model`。多个 AI 可以重复使用同一个 Key。
+5. 每个地址都须兼容 OpenAI Chat Completions；不同 AI 可以使用不同的服务商和模型名称。
+6. 进入世界前，在服务器本机启动 `python tools/ai_http_bridge.py`。
+
+`modoverrides.lua` 示例：
 
 ```lua
 return {
@@ -56,26 +61,26 @@ return {
 }
 ```
 
-Use your actual local mod folder name as the entry key. After publishing to Workshop, replace it with `workshop-` followed by the actual Workshop ID.
+配置条目的键应使用实际本地模组文件夹名。发布到创意工坊后，改为 `workshop-` 加实际创意工坊 ID。
 
-## Bot lifecycle and current behavior
+## 生命周期与当前能力
 
-- The surface server clamps the configured count to 0-5 and starts after the first living human enters. The same path handles a new world and enabling the mod before resuming an existing save.
-- Each configured key creates an **[AI] AI N** player-list row in **Selecting** state. The model chooses independently from supported base characters. After selection, the character spawns on safe ground near the human and the row changes to **Alive**. Duplicate human/bot join events do not create duplicate bots. Missing keys skip their bot.
-- If selection fails, returns an unsupported character or exceeds 60 seconds, a supported default character is used. This fallback is logged. A disconnected human delays entry until a human returns. There is no requirement to run or click through an additional real client's character-selection screen.
-- The model receives health, hunger, sanity, inventory counts, equipment, nearby usable resources and GUIDs, threats, light, phase and available item recipes. It can request gathering, eating, item crafting/equipping, chopping/mining with owned tools, wandering, speech, waiting, following or attacking non-player targets.
-- The local quarter-second survival loop avoids imminent attackers, eats suitable owned food when hungry, gathers food and bounded grass/twig supplies, and crafts/equips a torch using actual ingredients. Pending movement/work and busy stategraph actions are preserved. Bots have no free supplies, health or invincibility. Model failures leave this local behavior running.
-- Bot rows use normal scrolling and show status and character. They have no real-client profile, mute, kick, ban or account actions. They do not alter the network client table or authenticated player count.
-- Bots use native character prefabs, which participate in some native player gameplay systems even without client identities. This is still an early bot implementation, not a complete player replacement.
-- Death is shown as **Dead**; automatic resurrection is not implemented. Bots and their inventories are recreated each world session, rather than persisted as authenticated player sessions. They do not migrate into caves, and the player-list snapshot is currently replicated within the surface shard only.
-- Crafting currently supports known non-placement item recipes, such as torches, axes and pickaxes. Base-building placement, advanced pathfinding, seasons/boss strategies and reliable long-term autonomous survival are not implemented.
-- The bridge accepts a provider root, `/v1` prefix or full `/chat/completions` endpoint. A root URL gains `/v1/chat/completions`; other API prefixes gain `/chat/completions`. The bridge adds Authorization; native DST POST uses its supported four-argument `QueryServer` form.
+- 地表服务器将数量限制在 0–5，并在第一个存活真人进入后启动。新世界与启用模组后继续的旧存档使用同一启动流程。
+- 每个配置了 Key 的槽位会先创建 **[AI] AI N** 玩家列表条目，状态为 **Selecting**。模型独立选择支持的基础角色，随后在真人附近的安全地面生成，状态变为 **Alive**。重复加入事件不会重复生成机器人；缺少 Key 的槽位会跳过。
+- 选角失败、返回不支持的角色或超过 60 秒时，使用支持的默认角色并记录回退信息。如果真人已断开，等待真人返回后再进入。无需额外启动真实客户端或手动点击选角界面。
+- 模型可观察生命、饥饿、理智、背包数量、装备、附近可用资源及 GUID、威胁、光照、时段和可制作的物品配方；可请求采集、进食、制作或装备物品、使用已有工具砍树或挖矿、闲逛、说话、等待、跟随，以及攻击非玩家目标。
+- 本地四分之一秒生存循环会躲避迫近的攻击者、饥饿时吃适合且已持有的食物、收集食物和限量草枝，并使用真实材料制作或装备火把。已有移动、工作和忙碌状态会被保留。机器人没有免费物资、生命或无敌能力；模型请求失败时，本地生存行为仍会运行。
+- 玩家列表支持正常滚动，显示状态与角色。机器人没有真实客户端的个人资料、静音、踢出、封禁或账号操作，不修改网络客户端表和已认证玩家数量。
+- 机器人使用原生角色预制体，即使没有客户端身份，也会参与部分原生玩家玩法系统。目前仍是早期实现，不是完整玩家替代品。
+- 死亡显示为 **Dead**，尚无自动复活。机器人及背包每次世界会话都会重新创建，不作为已认证玩家会话持久保存。机器人不会迁移到洞穴，列表快照目前也仅在地表分片内复制。
+- 制作仅支持已知且无需地面放置的物品配方，例如火把、斧头、镐子。尚未实现放置式基地建设、高级寻路、季节或 Boss 策略，以及可靠的长期自主生存。
+- 桥接接受服务商根地址、`/v1` 前缀或完整 `/chat/completions` 地址。根地址补齐 `/v1/chat/completions`，其他 API 前缀补齐 `/chat/completions`。桥接添加 Authorization，游戏原生 POST 使用已知支持的四参数 `QueryServer` 调用方式。
 
-The Lua regression suite covers entry, independent character selection, list replication, local actions and request failures. Native-engine smoke testing in an isolated offline WeGame runtime was blocked before Lua initialization by Rail (`Please make sure the TGP is running!`, result 2). Actual game rendering, remote replication and long-running survival have not been validated.
+Lua 回归覆盖进入世界、独立选角、列表复制、本地动作和请求失败。隔离离线 WeGame 环境的原生引擎冒烟测试在 Lua 初始化前被 Rail 阻止，报错 `Please make sure the TGP is running!`，结果码为 2。实际游戏画面、远端复制和长期生存尚未验证。
 
-## Tests
+## 测试
 
-The regressions use Lua 5.1 through `lupa`. Point `DST_SCRIPTS_ZIP` to your installed game's `data/databundles/scripts.zip` to exercise its actual configuration and player-list screen Lua with mocked engine/widgets; game source is not included in this repository. Native-screen tests explicitly skip if that resource is unavailable. HTTP tests run the real local bridge against fixture upstream servers, without paid model calls.
+回归通过 `lupa` 使用 Lua 5.1。将 `DST_SCRIPTS_ZIP` 指向已安装游戏的 `data/databundles/scripts.zip`，即可在模拟引擎与控件环境下测试实际配置页和玩家列表 Lua。本仓库不包含游戏源码；资源不可用时，原生界面测试会明确跳过。HTTP 测试使用真实本地桥接连接测试服务端，不调用付费模型。
 
 ```powershell
 python -m pip install lupa
@@ -84,13 +89,17 @@ python -m unittest discover -s tests -p 'test_*.py' -v
 powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\test_static.ps1
 ```
 
-## Logs
+## 日志
 
-On Windows, inspect:
+Windows 下可检查：
 
 ```text
 Documents/Klei/DoNotStarveTogether/server_log.txt
 Documents/Klei/DoNotStarveTogether/client_log.txt
 ```
 
-Never commit a real `modoverrides.lua` containing API keys.
+不要提交包含真实 API Key 的 `modoverrides.lua`。
+
+## 贡献约定
+
+后续新增提交的标题和正文均使用中文，不改写已有提交历史。功能或配置方式改变时，请同步更新默认中文说明与[英文版](README.en.md)。

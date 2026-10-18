@@ -32,7 +32,7 @@ class CompanionActionsTest(unittest.TestCase):
                 end, decode=function(content)
                     decode_count = decode_count + 1
                     assert(content == "fixture-say", "unexpected response fixture")
-                    return {action="say", message="late response"}
+                    return {action="say", message="late response", ask=true}
                 end}
             end
             function Vector3(x, y, z)
@@ -208,9 +208,14 @@ class CompanionActionsTest(unittest.TestCase):
             assert(not tasks[2].cancelled, "old response cancelled the newer request timeout")
             requests[2]("fixture-say", nil)
             assert(not companion._ai_busy and tasks[2].cancelled)
-            assert(decode_count==1 and #spoken==1 and spoken[1]=="late response")
+            assert(decode_count==1 and #spoken==0, "autonomous action replies must not be broadcast as periodic plans")
             requests[2]("fixture-say", nil)
-            assert(decode_count==1 and #spoken==1, "duplicate callback applied twice")
+            assert(decode_count==1 and #spoken==0, "duplicate callback applied twice")
+            companion._ai_provider.Complete=function(_,messages,callback)
+                callback('fixture-say',nil)
+            end
+            manager:Think(companion)
+            assert(#spoken==0, "autonomous model question must not bypass help cooldown")
         ''')
 
 

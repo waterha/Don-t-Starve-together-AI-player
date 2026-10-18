@@ -246,6 +246,10 @@ class BotLifecycleTest(unittest.TestCase):
             assert(#spawned==1, "repeated human or bot join events duplicated bots")
             spawned[1].listeners.death()
             assert(snapshots[#snapshots][1].status=="dead")
+            local request_count=#requests
+            owner=human(120,240); joined(TheWorld,owner); advance(5)
+            assert(#spawned==1 and #requests==request_count, "dead bots must remain retired without respawning or requesting")
+            assert(manager.slots[1].retired)
         ''')
 
     def test_existing_save_with_human_already_present_starts_selection(self):

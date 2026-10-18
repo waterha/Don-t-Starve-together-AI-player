@@ -177,11 +177,11 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     if slot then
         slot.inst, slot.character, slot.status = inst, character, "alive"
         inst:ListenForEvent("death", function()
-            slot.status = "dead"
+            slot.status, slot.retired = "dead", true
             self:PublishRoster()
         end)
         inst:ListenForEvent("onremove", function()
-            slot.status = "dead"
+            slot.status, slot.retired = "dead", true
             self:PublishRoster()
         end)
     end
@@ -256,7 +256,9 @@ function AIPlayerManager:EnsureCompanions()
     for index = 1, self.count do
         if self.keys[index] then
             local slot = self.slots[index]
-            if not slot then
+            if slot and slot.retired then
+                -- A dead bot remains retired for this world session; never respawn it.
+            elseif not slot then
                 slot = { status = "selecting", provider = new_provider(self, index, self.keys[index]) }
                 self.slots[index] = slot
                 self:PublishRoster()

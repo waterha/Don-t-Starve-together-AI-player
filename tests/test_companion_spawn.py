@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class BotLifecycleTest(unittest.TestCase):
     def runtime(self, primary=True, count=1, existing_human=False):
         lua = LuaRuntime()
+        lua.globals().package.path = str(ROOT / 'scripts' / '?.lua').replace('\\', '/') + ';' + lua.globals().package.path
         def table(value):
             if isinstance(value, dict):
                 return lua.table_from({k: table(v) for k, v in value.items()})

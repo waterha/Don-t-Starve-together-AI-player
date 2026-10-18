@@ -1,5 +1,6 @@
 local Provider = require("ai_provider")
 local Survival = require("ai_survival")
+local Progression = require("ai_progression")
 local Roster = require("ai_players_roster")
 local json = require("json")
 
@@ -8,9 +9,13 @@ AIPlayerManager.__index = AIPlayerManager
 
 local MAX_PLAYERS = 5
 local CHARACTERS = { "wilson", "willow", "wolfgang", "wendy", "wx78", "wickerbottom", "woodie", "wathgrithr", "webber" }
-local SYSTEM_PROMPT = [[You independently play a survivor in Don't Starve Together.
-Return ONLY JSON: {"action":"gather|eat|craft|equip|chop|mine|wander|say|attack|wait|follow","target":"nearby prefab or GUID","item":"inventory prefab","recipe":"recipe name","message":"short text"}.
-Use the observed inventory, nearby resources, hunger, health, light and threats. Collect food and materials, eat before starving, prepare a torch before night, and avoid dangerous combat. Never attack players. Craft only recipes you can actually make. Do not just follow the human; pursue your own survival.]]
+local SYSTEM_PROMPT = [[You independently play Don't Starve Together. Pursue the observed progression goal; collecting is a means, not an end.
+Return ONLY JSON: {"action":"gather|eat|craft|build|equip|chop|mine|explore|move|say|attack|wait|follow","target":"observed prefab or GUID","item":"owned prefab","recipe":"recipe name","message":"short text"}.
+Priority: escape threats, stay out of darkness, eat appropriate food, then advance one milestone. Keep grass/twigs for a torch before dusk. Never attack players or assume all characters eat berries; use actual edible food and character restrictions.
+Starter knowledge: axe costs 1 twig + 1 flint; pickaxe 2 twigs + 2 flint; torch 2 grass + 2 twigs; science machine researchlab 4 logs + 4 rocks + 1 gold. Runtime recipes override these ordinary-character costs. Chop with an owned usable axe, mine with a usable pickaxe; rock2 is a gold-bearing boulder, rock1 is not. Pick up dropped logs/minerals after working.
+Build a real researchlab on legal ground with actual materials; issuing a build is not completion. Reuse observed science stations, move within 3 units to prototype a backpack, and equip it. craftable/recipes describe current technology and materials; unknown recipes need a nearby compatible station and character permission. Never invent items, recipes, coordinates or success.
+The progression observation contains your persistent goal, shortages, last action and blocked state. Continue until actual inventory or structures prove progress. Gather only shortages and finite reserves; when no resource is observed, explore a new route rather than wait or collect unrelated items. Retain ongoing work unless safety demands otherwise. Night needs actual light; a spent campfire alone is not safety.
+Supported construction: researchlab, campfire, firepit. Cooking, fueling, farming, advanced base construction and seasonal/Boss strategy are not implemented; do not pretend an unsupported action succeeded.]]
 
 local function safe_config(self, name, default)
     local value = self.get_config(name)
@@ -141,6 +146,13 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     inst._ai_index, inst._ai_owner, inst._ai_mode = index, owner, "autonomous"
     inst._ai_provider = slot and slot.provider or new_provider(self, index, api_key)
     inst._ai_busy = false
+    inst:ListenForEvent("buildstructure", function(_, data)
+        local structure = data and data.item
+        if structure and structure:IsValid() and structure.prefab == "researchlab" and structure.Transform then
+            local cx, cy, cz = structure.Transform:GetWorldPosition()
+            inst._ai_camp = {guid = structure.GUID, prefab = structure.prefab, x = cx, y = cy, z = cz}
+        end
+    end)
     self.players[#self.players + 1] = inst
     self.by_index[index] = inst
     if slot then
@@ -231,6 +243,62 @@ function AIPlayerManager:Wander(inst)
     end
 end
 
+function AIPlayerManager:Explore(inst)
+    if not available(inst) or not TheWorld.Map then return false end
+    local x, y, z = inst.Transform:GetWorldPosition()
+    local now = GetTime()
+    local memory = inst._ai_exploration or {heading = (inst._ai_index or 1) * 1.7, visited = {}}
+    inst._ai_exploration = memory
+    if memory.destination then
+        local dx, dz = x - memory.destination.x, z - memory.destination.z
+        if dx * dx + dz * dz > 9 and now - memory.started < 12 then return true end
+        memory.destination = nil
+    end
+    local best, score, heading
+    for step = 0, 7 do
+        local angle = memory.heading + step * math.pi / 4
+        local px, pz = x + math.cos(angle) * 18, z + math.sin(angle) * 18
+        local point = Vector3(px, y, pz)
+        local cell = math.floor(px / 12) .. ":" .. math.floor(pz / 12)
+        local visits = memory.visited[cell] or 0
+        if (score == nil or visits < score) and TheWorld.Map:IsPassableAtPoint(px, 0, pz)
+            and not TheWorld.Map:IsGroundTargetBlocked(point) then
+            best, score, heading = {point = point, cell = cell}, visits, angle
+        end
+    end
+    if not best then return false end
+    memory.visited[best.cell] = score + 1
+    memory.count = (memory.count or 0) + 1
+    if memory.count >= 128 then memory.visited, memory.count = {[best.cell] = 1}, 1 end
+    memory.heading, memory.destination, memory.started = heading, best.point, now
+    inst.components.locomotor:GoToPoint(best.point, nil, true)
+    return true
+end
+
+function AIPlayerManager:MoveToStation(inst, action)
+    for _, target in ipairs(nearby(inst)) do
+        if target.prefab == "researchlab" and target.Transform
+            and (target.GUID == action.target_guid or target.GUID == tonumber(action.target) or target.prefab == action.target) then
+            local x, y, z = target.Transform:GetWorldPosition()
+            inst.components.locomotor:GoToPoint(Vector3(x + 1, y, z), nil, true)
+            return true
+        end
+    end
+    local station = inst._ai_progression and inst._ai_progression.station
+    local remembered = station and Ents and Ents[station.guid]
+    if remembered and remembered:IsValid() and remembered.prefab == "researchlab" and remembered.Transform then
+        local x, y, z = remembered.Transform:GetWorldPosition()
+        inst.components.locomotor:GoToPoint(Vector3(x + 1, y, z), nil, true)
+        return true
+    end
+    local camp = inst._ai_camp
+    if camp and camp.prefab == "researchlab" and camp.x and camp.z then
+        inst.components.locomotor:GoToPoint(Vector3(camp.x + 1, camp.y or 0, camp.z), nil, true)
+        return true
+    end
+    return false
+end
+
 function AIPlayerManager:ApplyAction(inst, action)
     if not alive(inst) or type(action) ~= "table" then return end
     local name = action.action or "wait"
@@ -246,6 +314,12 @@ function AIPlayerManager:ApplyAction(inst, action)
     if name == "say" then say(inst, action.message)
     elseif name == "follow" then inst._ai_mode = "follow"; self:Follow(inst)
     elseif name == "wander" then inst._ai_mode = "autonomous"; self:Wander(inst)
+    elseif name == "explore" then
+        inst._ai_mode, inst._ai_survival_work = "autonomous", nil
+        self:Explore(inst)
+    elseif name == "move" then
+        inst._ai_mode, inst._ai_survival_work = "autonomous", nil
+        self:MoveToStation(inst, action)
     elseif name == "wait" then
         inst._ai_mode = "autonomous"
         if inst.components.locomotor then inst.components.locomotor:Stop() end
@@ -268,6 +342,7 @@ function AIPlayerManager:Think(inst)
     if not alive(inst) or inst._ai_busy or not find_human() then return end
     inst._ai_busy = true
     local observation = Survival.Observe(inst)
+    observation.progression = Progression.Observe(inst, observation)
     local x, y, z = inst.Transform:GetWorldPosition()
     observation.position, observation.character = { x = x, y = y, z = z }, inst.prefab
     observation.name = inst.name
@@ -295,8 +370,8 @@ end
 
 function AIPlayerManager:UpdateLocal(inst)
     if not alive(inst) then return end
-    -- Survival retains priority over delayed model instructions.
-    if Survival.Tick(inst, inst._ai_pending_action ~= nil) then return end
+    -- Autonomous progression reevaluates shortages instead of endlessly chopping one tree.
+    if Survival.Tick(inst, inst._ai_pending_action ~= nil or inst._ai_mode == "autonomous") then return end
     if not available(inst) then return end
     local pending = inst._ai_pending_action
     if pending then
@@ -311,9 +386,20 @@ function AIPlayerManager:UpdateLocal(inst)
             inst._ai_next_follow = GetTime() + .5
             self:Follow(inst)
         end
-    elseif not inst._ai_next_wander or GetTime() >= inst._ai_next_wander then
-        inst._ai_next_wander = GetTime() + 2
-        self:Wander(inst)
+    elseif not inst._ai_next_progress or GetTime() >= inst._ai_next_progress then
+        inst._ai_next_progress = GetTime() + 1
+        local observation = Survival.Observe(inst)
+        if Survival.CanDevelop and not Survival.CanDevelop(inst) then return end
+        local previous_goal = inst._ai_progression and inst._ai_progression.goal
+        Progression.Tick(inst, observation, function(action)
+            if action.action == "explore" then return self:Explore(inst) end
+            if action.action == "move" then return self:MoveToStation(inst, action) end
+            return Survival.Apply(inst, action)
+        end)
+        local state = inst._ai_progression
+        if state and state.goal ~= previous_goal then
+            print(string.format("[AI Players] AI %d goal: %s (%s)", inst._ai_index, state.goal, state.reason))
+        end
     end
 end
 

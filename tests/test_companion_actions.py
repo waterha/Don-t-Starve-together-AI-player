@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class CompanionActionsTest(unittest.TestCase):
     def setUp(self):
         self.lua = LuaRuntime()
+        self.lua.globals().package.path = str(ROOT / 'scripts' / '?.lua').replace('\\', '/') + ';' + self.lua.globals().package.path
         self.lua.execute('''
             requests, tasks, found, moves, pushed, spoken = {}, {}, {}, {}, {}, {}
             decode_count = 0

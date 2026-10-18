@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ManagerConfigTest(unittest.TestCase):
     def test_bound_configuration_and_delayed_world_initialization(self):
         lua = LuaRuntime()
+        lua.globals().package.path = str(ROOT / 'scripts' / '?.lua').replace('\\', '/') + ';' + lua.globals().package.path
         lua.execute('''
             config = {ai_count=2, ai_1_api_key="fixture-key", ai_2_api_key="fixture-key", request_interval=60}
             function GetModConfigData(name, modname)

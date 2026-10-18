@@ -44,6 +44,7 @@ class SurvivalTest(unittest.TestCase):
                 return {doer=doer,target=target,action=action,invobject=invobject,pos=pos}
             end
             bot.components.inventory={
+                IsOpenedBy=function(_,actor) return actor==bot end,
                 equipslots=equipped,
                 FindItems=function(_,predicate)
                     local result={}
@@ -71,6 +72,9 @@ class SurvivalTest(unittest.TestCase):
                 KnowsRecipe=function(_,recipe) assert(type(recipe)=='table'); return not recipe.unknown end,
                 HasIngredients=function(_,recipe) assert(type(recipe)=='table'); return recipe.available or false end,
                 MakeRecipe=function(_,recipe) assert(recipe.available and not recipe.unknown); crafted[#crafted+1]=recipe.name; return true end,
+                MakeRecipeFromMenu=function(self,recipe)
+                    if self:MakeRecipe(recipe) then bot.components.locomotor.bufferedaction={action='BUILD'} end
+                end,
             }
             function GetValidRecipe(name) return recipes[name] end
             function food(name,hunger,health,sanity)

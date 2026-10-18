@@ -87,12 +87,55 @@ local function push(inst, target, action, item, point)
     return true
 end
 
+local RECIPES = {"torch", "axe", "pickaxe", "campfire", "firepit", "researchlab", "backpack"}
+local BUILDINGS = {campfire = true, firepit = true, researchlab = true}
+
+local function accessible(builder, recipe)
+    if builder:KnowsRecipe(recipe) then return true end
+    return builder.CanLearn ~= nil and builder:CanLearn(recipe.name)
+        and CanPrototypeRecipe ~= nil
+        and CanPrototypeRecipe(recipe.level, builder.accessible_tech_trees or {}) or false
+end
+
+local function crafting_allowed(inst, builder)
+    local inventory = inst.components.inventory
+    return builder ~= nil and not builder.freebuildmode and inventory ~= nil
+        and inventory:IsOpenedBy(inst)
+end
+
 local function craft(inst, name)
     local builder = inst.components.builder
     local recipe = type(name) == "string" and GetValidRecipe(name) or nil
-    if builder == nil or recipe == nil or recipe.placer ~= nil or builder.freebuildmode
-        or not builder:KnowsRecipe(recipe) or not builder:HasIngredients(recipe) then return false end
-    return builder:MakeRecipe(recipe) == true
+    if not crafting_allowed(inst, builder) or recipe == nil or recipe.placer ~= nil
+        or not accessible(builder, recipe) or not builder:HasIngredients(recipe) then return false end
+    -- The native menu path unlocks prototypes on success and returns no value.
+    builder:MakeRecipeFromMenu(recipe)
+    return busy(inst) and true or false
+end
+
+local function build(inst, name)
+    if not BUILDINGS[name] then return false end
+    local builder, map = inst.components.builder, TheWorld.Map
+    local recipe = GetValidRecipe(name)
+    if not crafting_allowed(inst, builder) or recipe == nil or recipe.placer == nil
+        or not accessible(builder, recipe) or map == nil
+        or (not builder:IsBuildBuffered(name) and not builder:HasIngredients(recipe)) then return false end
+    local x, y, z = inst.Transform:GetWorldPosition()
+    for _, radius in ipairs({2, 4, 6}) do
+        for step = 0, 7 do
+            local angle = step * math.pi / 4
+            local point = Vector3(x + math.cos(angle) * radius, y, z + math.sin(angle) * radius)
+            if map:IsPassableAtPoint(point.x, 0, point.z)
+                and not map:IsGroundTargetBlocked(point)
+                and map:CanDeployRecipeAtPoint(point, recipe, 0, inst) then
+                if not builder:IsBuildBuffered(name) then builder:BufferBuild(name) end
+                if not builder:IsBuildBuffered(name) then return false end
+                builder:MakeRecipeAtPoint(recipe, point, 0)
+                return busy(inst) and true or false
+            end
+        end
+    end
+    return false
 end
 
 local function equip(inst, item)
@@ -151,7 +194,15 @@ function Survival.Observe(inst)
         sanity = status(inst.components.sanity, "current", "max"),
         inventory = count_inventory(inst), equipment = {}, nearby = {}, threats = {},
         light = light(inst), busy = busy(inst) and true or false, craftable = {},
+        recipes = {}, structures = {}, tools = {}, food_count = 0,
     }
+    for _, item in ipairs(items(inst)) do
+        if usable_equipment(inst, item) then observation.tools[item.prefab] = true end
+        if edible(inst, item) then
+            local stack = item.components.stackable
+            observation.food_count = observation.food_count + (stack ~= nil and stack:StackSize() or 1)
+        end
+    end
     local inventory = inst.components.inventory
     for slot, item in pairs(inventory ~= nil and inventory.equipslots or {}) do
         observation.equipment[tostring(slot)] = item.prefab
@@ -159,9 +210,17 @@ function Survival.Observe(inst)
     for _, target in ipairs(nearby(inst)) do
         local descriptor = {guid = target.GUID, prefab = target.prefab,
             distance = math.sqrt(inst:GetDistanceSqToInst(target)), actions = {}}
+        if BUILDINGS[target.prefab] and safe_resource(target) then
+            local tx, ty, tz = target.Transform:GetWorldPosition()
+            observation.structures[#observation.structures + 1] = {guid = target.GUID, prefab = target.prefab,
+                x = tx, y = ty, z = tz, distance = descriptor.distance}
+        end
         local action = gather_action(inst, target)
         if action ~= nil then descriptor.actions[#descriptor.actions + 1] = action == ACTIONS.PICK and "pick" or "pickup" end
+        local pickable = target.components.pickable
+        if pickable and type(pickable.product) == "string" then descriptor.product = pickable.product end
         local workable = target.components.workable
+        if workable and workable.GetWorkLeft then descriptor.work_left = workable:GetWorkLeft() end
         if safe_resource(target) and workable ~= nil and workable:CanBeWorked() then
             local work = workable:GetWorkAction()
             if work == ACTIONS.CHOP or work == ACTIONS.MINE then
@@ -173,10 +232,20 @@ function Survival.Observe(inst)
     end
     local builder = inst.components.builder
     if builder ~= nil and not builder.freebuildmode then
-        for _, name in ipairs({"torch", "axe", "pickaxe"}) do
+        for _, name in ipairs(RECIPES) do
             local recipe = GetValidRecipe(name)
-            if recipe ~= nil and builder:KnowsRecipe(recipe) and builder:HasIngredients(recipe) then
-                observation.craftable[#observation.craftable + 1] = name
+            if recipe ~= nil then
+                local detail = {known = builder:KnowsRecipe(recipe), accessible = accessible(builder, recipe),
+                    ingredients_available = builder:HasIngredients(recipe),
+                    buffered = builder.IsBuildBuffered ~= nil and builder:IsBuildBuffered(name) or false,
+                    ingredients = {}}
+                for _, ingredient in ipairs(recipe.ingredients or {}) do
+                    detail.ingredients[#detail.ingredients + 1] = {prefab = ingredient.type, amount = ingredient.amount}
+                end
+                observation.recipes[name] = detail
+                if detail.accessible and (detail.ingredients_available or detail.buffered) then
+                    observation.craftable[#observation.craftable + 1] = name
+                end
             end
         end
     end
@@ -192,6 +261,9 @@ function Survival.Apply(inst, action)
     if not valid(inst) or busy(inst) or type(action) ~= "table" then return false end
     if inst.components.health ~= nil and inst.components.health:IsDead() then return false end
     local name = action.action or action.type
+    if name == "build" then
+        return explicit_override(inst, build(inst, action.recipe or action.item or action.target))
+    end
     if name == "craft" then
         return explicit_override(inst, craft(inst, action.recipe or action.item or action.target))
     end
@@ -246,6 +318,19 @@ local function gather_for(inst, entities, wanted)
         end
     end
     return false
+end
+
+function Survival.CanDevelop(inst)
+    if not valid(inst) or busy(inst) then return false end
+    local illumination = light(inst)
+    if (illumination.phase == "night" or TheWorld.state and TheWorld.state.isnight)
+        and not illumination.in_light and not illumination.torch_equipped then return false end
+    local hunger = inst.components.hunger
+    if hunger and hunger:GetPercent() < .1 then return false end
+    for _, target in ipairs(nearby(inst)) do
+        if threat(inst, target) and inst:GetDistanceSqToInst(target) < 36 then return false end
+    end
+    return true
 end
 
 function Survival.Tick(inst, skip_work)
@@ -313,7 +398,8 @@ function Survival.Tick(inst, skip_work)
     for _, item in ipairs(items(inst)) do
         if edible(inst, item) then food_count = food_count + (item.components.stackable ~= nil and item.components.stackable:StackSize() or 1) end
     end
-    if food_count < 6 then
+    local stored_plants = (counts.berries or 0) + (counts.berries_juicy or 0) + (counts.carrot or 0)
+    if math.max(food_count, stored_plants) < 6 then
         if gather_for(inst, entities, function(product, target)
             return (target.components.edible ~= nil and edible(inst, target))
                 or product == "berries" or product == "berries_juicy" or product == "carrot"

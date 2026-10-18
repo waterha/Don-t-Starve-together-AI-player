@@ -37,6 +37,12 @@ Candidates come from the world's built-in character list and `AddModCharacter` r
 
 Invalid or timed-out choices use an available fallback. Failed mod-character spawning tries an available safe default; with no available character, no bot is spawned. Names and characters are chosen again each world session rather than persisted. Generic survival behavior does not implement every mod character's special abilities. Characters requiring real clients or custom initialization may be incompatible; third-party character mods have not each been validated in game.
 
+## Selection Troubleshooting
+
+Version 0.2.7 fixes the mismatch between DST's private `json.encode` and standard HTTP JSON. Apostrophes in prompts could become invalid `\\'` escapes, causing `invalid completion request` before the model received anything. Outbound requests now use compliant encoding with complete control-character escaping. The bridge normalizes Unicode escapes in both the response envelope and model JSON content to UTF-8, preventing misread Chinese names or escaped character identifiers. Restart the world server and API bridge after upgrading; existing provider settings and request counts are unchanged.
+
+`model selected character willow` confirms a model choice. `character selection failed (...); fallback wilson` records fallback with a fixed reason for configuration/API errors, timeout, invalid JSON, or an unavailable character. Logs include no keys or response bodies. The model may still legitimately choose Wilson; this fix does not force randomized characters. Unavailable APIs retain a safe fallback, and gathering alone does not prove connectivity because local planning works independently.
+
 ## Goal-Driven Progression
 
 The previous local loop only restocked grass, twigs and food; it had no technology milestones or building-placement capability. Each bot now retains an independent session goal: **light supplies -> axe -> logs -> pickaxe -> rocks and gold -> science machine -> approach the station, prototype and equip a backpack -> bounded reserves and exploration**. An observed existing science machine can be reused. Safety and food remain higher priority; goal checks run once per second without increasing scheduled API calls.

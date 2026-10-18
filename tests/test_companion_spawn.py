@@ -93,6 +93,28 @@ class BotLifecycleTest(unittest.TestCase):
         lua.execute('manager=Manager.new(function(name) return config[name] end); manager:Start()')
         return lua
 
+    def test_selection_diagnostics_distinguish_failure_without_exposing_values(self):
+        cases = (
+            (None, 'invalid api_key', 'invalid api_key'),
+            (None, 'upstream returned HTTP 401', 'upstream returned HTTP 401'),
+            (None, 'private fixture-key', 'model request failed'),
+            ('not JSON', None, 'invalid selection JSON'),
+            ('{"character":"missing_mod"}', None, 'character not in enabled roster'),
+        )
+        for content, error, reason in cases:
+            with self.subTest(reason=reason):
+                lua = self.runtime(existing_human=True)
+                lua.execute('logs={}; print=function(value) logs[#logs+1]=value end; advance(2)')
+                lua.globals().requests[1].callback(content, error)
+                output = '\n'.join(lua.globals().logs.values())
+                self.assertIn('character selection failed (' + reason + '); fallback wilson', output)
+                self.assertNotIn('fixture-key', output)
+        lua = self.runtime(existing_human=True)
+        lua.execute('logs={}; print=function(value) logs[#logs+1]=value end; advance(2)')
+        lua.globals().requests[1].callback('{"name":"Test","character":"willow"}', None)
+        self.assertEqual(lua.globals().spawned[1].prefab, 'willow')
+        self.assertIn('model selected character willow', '\n'.join(lua.globals().logs.values()))
+
     def test_chooses_name_and_registered_mod_character(self):
         lua = self.runtime(existing_human=True)
         lua.execute('''

@@ -11,7 +11,7 @@ class ProviderTransportTest(unittest.TestCase):
         lua = LuaRuntime()
         lua.execute('''
             package.preload.json = function() return {
-                encode=function(value) encoded=value; return "json-payload" end,
+                encode_compliant=function(value) encoded=value; return "json-payload" end,
                 decode=function(value)
                     if value=="success" then return {choices={{message={content='{"action":"follow"}'}}}} end
                     if value=="bridge-error" then return {error="upstream HTTP 401"} end
@@ -61,6 +61,15 @@ class ProviderTransportTest(unittest.TestCase):
             assert(encoded.max_tokens==320)
             p:Complete({},done,100000)
             assert(encoded.max_tokens==160)
+        ''')
+
+    def test_encoding_failure_is_reported_once_without_sending(self):
+        lua = self.runtime()
+        lua.execute('''
+            require("json").encode_compliant=function() error("private fixture-key") end
+            Provider.new(nil,nil,"fixture-key"):Complete({},done)
+            assert(calls==0 and completed==1)
+            assert(result==nil and failure=="completion request encoding failed")
         ''')
 
     def test_missing_key_does_not_send_request(self):

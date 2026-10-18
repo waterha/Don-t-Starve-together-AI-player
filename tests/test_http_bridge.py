@@ -77,7 +77,7 @@ class BridgeTest(unittest.TestCase):
                 payload["unrecognized"] = "not forwarded"
                 status, body = self.request(payload)
                 self.assertEqual(status, 200)
-                self.assertEqual(body, self.upstream.reply_body)
+                self.assertEqual(json.loads(body), json.loads(self.upstream.reply_body))
                 path, headers, forwarded = self.upstream.received[-1]
                 self.assertEqual(path, expected)
                 self.assertEqual(headers["Authorization"], "Bearer fixture-key")
@@ -104,6 +104,12 @@ class BridgeTest(unittest.TestCase):
                 status, body = self.request(self.payload())
                 self.assertEqual(status, 502)
                 self.assertEqual(json.loads(body)["error"]["message"], "upstream returned invalid JSON")
+
+    def test_invalid_unicode_upstream_response_is_sanitized(self):
+        self.upstream.reply_body = b'{"choices":[{"message":{"content":"\\ud800"}}]}'
+        status, body = self.request(self.payload())
+        self.assertEqual(status, 502)
+        self.assertEqual(json.loads(body), {"error": {"message": "upstream returned invalid JSON"}})
 
     def test_health_and_routes(self):
         self.assertEqual(self.request(path="/health", method="GET"), (200, b'{"ok":true}'))

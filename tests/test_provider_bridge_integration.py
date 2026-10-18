@@ -34,7 +34,7 @@ class ProviderBridgeIntegrationTest(unittest.TestCase):
 
         lua.globals().encode_json = lambda value: json.dumps(from_lua(value))
         lua.globals().decode_json = lambda value: to_lua(json.loads(value))
-        lua.execute('package.preload.json = function() return {encode=encode_json, decode=decode_json} end')
+        lua.execute('package.preload.json = function() return {encode_compliant=encode_json, decode=decode_json} end')
         calls = []
 
         def query_server(_self, url, callback, method, payload):

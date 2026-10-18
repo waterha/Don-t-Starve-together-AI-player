@@ -143,6 +143,24 @@ class BridgeHandler(BaseHTTPRequestHandler):
         except (URLError, OSError):
             self._error(502, "upstream connection failed")
             return
+        # DST's decoder does not implement JSON Unicode escapes. Normalize both
+        # the envelope and model-generated JSON content using real UTF-8 text.
+        try:
+            choices = decoded.get("choices")
+            for choice in choices if isinstance(choices, list) else ():
+                message = choice.get("message") if isinstance(choice, dict) else None
+                content = message.get("content") if isinstance(message, dict) else None
+                if isinstance(content, str):
+                    try:
+                        document = json.loads(content)
+                    except (ValueError, TypeError):
+                        continue
+                    if isinstance(document, dict):
+                        message["content"] = json.dumps(document, ensure_ascii=False, separators=(",", ":"))
+            body = json.dumps(decoded, ensure_ascii=False).encode("utf-8")
+        except (ValueError, UnicodeError):
+            self._error(502, "upstream returned invalid JSON")
+            return
         self._reply(200, body)
 
 

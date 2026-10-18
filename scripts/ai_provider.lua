@@ -30,15 +30,26 @@ function Provider:Complete(messages, callback, max_tokens)
     end
     -- Native QueryServer's supported POST form has no headers table. The local
     -- bridge adds Authorization for the configured upstream API, never a third party.
-    local payload = json.encode({
-        base_url = self.base_url,
-        api_key = self.api_key,
-        model = self.model,
-        messages = messages,
-        temperature = 0.2,
-        max_tokens = max_tokens == 320 and 320 or 160,
-        response_format = { type = "json_object" },
-    })
+    -- DST's save-data encoder escapes apostrophes as \\', which is not JSON.
+    local encoded_ok, payload = pcall(function()
+        local encoded = json.encode_compliant({
+            base_url = self.base_url,
+            api_key = self.api_key,
+            model = self.model,
+            messages = messages,
+            temperature = 0.2,
+            max_tokens = max_tokens == 320 and 320 or 160,
+            response_format = { type = "json_object" },
+        })
+        -- The native compliant encoder still leaves some ASCII controls raw.
+        return (encoded:gsub("[%z\1-\31]", function(char)
+            return string.format("\\u%04x", string.byte(char))
+        end))
+    end)
+    if not encoded_ok then
+        finish(nil, "completion request encoding failed")
+        return
+    end
     local ok = pcall(function()
         TheSim:QueryServer(BRIDGE_URL, function(response, success, status)
             local decoded_ok, decoded = pcall(json.decode, response or "")

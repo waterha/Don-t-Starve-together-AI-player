@@ -194,12 +194,36 @@ function AIPlayerManager:BeginSelection(index)
         finished = true
         if timeout then timeout:Cancel() end
         local ok, result = pcall(json.decode, content or "")
+        local reason
+        if err then
+            -- Only log fixed diagnostics; never echo remote bodies or config values.
+            local safe = {
+                ["invalid base_url"] = true, ["invalid api_key"] = true,
+                ["invalid model"] = true, ["invalid messages"] = true,
+                ["invalid completion request"] = true,
+                ["completion request encoding failed"] = true,
+                ["selection timed out"] = true,
+                ["upstream request timed out"] = true,
+                ["upstream connection failed"] = true,
+                ["upstream returned invalid JSON"] = true,
+                ["upstream reported API error"] = true,
+                ["API response has no message content"] = true,
+                ["invalid JSON response"] = true,
+            }
+            reason = safe[err] and err or
+                (type(err) == "string" and err:match("^upstream returned HTTP %d%d%d$")) or "model request failed"
+        elseif not ok or type(result) ~= "table" then
+            reason = "invalid selection JSON"
+        end
         result = ok and not err and type(result) == "table" and result or {}
         local selected = permitted_character(result.character, choices)
         slot.name = Roster.CleanName(result.name, index, "AI " .. index)
         if not selected then
+            reason = reason or "character not in enabled roster"
             selected = choices[((index - 1) % math.max(1, #choices)) + 1]
-            print(string.format("[AI Players] AI %d character selection unavailable; using %s", index, selected or "no available character"))
+            print(string.format("[AI Players] AI %d character selection failed (%s); fallback %s", index, reason, selected or "no available character"))
+        else
+            print(string.format("[AI Players] AI %d model selected character %s", index, selected))
         end
         slot.character = selected
         -- A disconnected human does not leave an unseen bot at the origin.

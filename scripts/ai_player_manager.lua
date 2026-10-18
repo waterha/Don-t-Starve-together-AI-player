@@ -17,6 +17,19 @@ local function safe_config(self, name, default)
     return value == nil and default or value
 end
 
+local function provider_option(self, index, name, default)
+    local value = safe_config(self, "ai_" .. index .. "_" .. name, "")
+    if type(value) == "string" and value ~= "" then return value end
+    -- Retain old shared settings only as a fallback for pre-upgrade saves.
+    value = safe_config(self, name, default)
+    return type(value) == "string" and value ~= "" and value or default
+end
+
+local function new_provider(self, index, api_key)
+    return Provider.new(provider_option(self, index, "api_base_url", "https://api.openai.com/v1"),
+        provider_option(self, index, "model", "gpt-4o-mini"), api_key)
+end
+
 local function is_human(player)
     return player and player:IsValid() and player.Transform and player.userid and player.userid ~= ""
         and not player:HasTag("ai_player") and not player:HasTag("playerghost")
@@ -96,9 +109,7 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     inst.Transform:SetPosition(px, y, pz)
     if inst.components.playercontroller then inst.components.playercontroller:Enable(false) end
     inst._ai_index, inst._ai_owner, inst._ai_mode = index, owner, "autonomous"
-    inst._ai_provider = slot and slot.provider or Provider.new(
-        safe_config(self, "api_base_url", "https://api.openai.com/v1"),
-        safe_config(self, "model", "gpt-4o-mini"), api_key)
+    inst._ai_provider = slot and slot.provider or new_provider(self, index, api_key)
     inst._ai_busy = false
     self.players[#self.players + 1] = inst
     self.by_index[index] = inst
@@ -157,9 +168,7 @@ function AIPlayerManager:EnsureCompanions()
         if self.keys[index] then
             local slot = self.slots[index]
             if not slot then
-                slot = { status = "selecting", provider = Provider.new(
-                    safe_config(self, "api_base_url", "https://api.openai.com/v1"),
-                    safe_config(self, "model", "gpt-4o-mini"), self.keys[index]) }
+                slot = { status = "selecting", provider = new_provider(self, index, self.keys[index]) }
                 self.slots[index] = slot
                 self:PublishRoster()
             end

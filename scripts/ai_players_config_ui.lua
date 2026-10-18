@@ -4,12 +4,15 @@ local ConfigUI = {}
 local registered_mods = {}
 local hook_installed = false
 
-local function key_index(name)
-    return tonumber(name:match("^ai_([1-5])_api_key$"))
+local function ai_option_index(name)
+    local index, field = name:match("^ai_([1-5])_(.+)$")
+    if field == "api_base_url" or field == "api_key" or field == "model" then
+        return tonumber(index)
+    end
 end
 
 local function is_text_option(name)
-    return key_index(name) ~= nil or name == "api_base_url" or name == "model"
+    return ai_option_index(name) ~= nil
 end
 
 local function configure_screen(screen)
@@ -23,7 +26,7 @@ local function configure_screen(screen)
     local displayed_count
 
     -- Keep the complete option list for Apply/Reset. Filter only the displayed
-    -- rows so reducing the AI count does not discard previously entered keys.
+    -- rows so hidden per-AI values and legacy fallback settings are preserved.
     list.RefreshView = function(self, ...)
         local count = 0
         for _, data in ipairs(screen.optionwidgets) do
@@ -36,8 +39,10 @@ local function configure_screen(screen)
             displayed_count = count
             local visible = {}
             for _, data in ipairs(screen.optionwidgets) do
-                local index = key_index(data.option.name)
-                if index == nil or index <= count then
+                local name = data.option.name
+                local index = ai_option_index(name)
+                if name ~= "api_base_url" and name ~= "model"
+                    and (index == nil or index <= count) then
                     table.insert(visible, data)
                 end
             end
@@ -123,7 +128,7 @@ local function configure_screen(screen)
         widget.opt.spinner:Hide()
         local entry = widget.ai_text_entry
         entry:Show()
-        entry.textbox:SetPassword(key_index(data.option.name) ~= nil)
+        entry.textbox:SetPassword(data.option.name:match("^ai_[1-5]_api_key$") ~= nil)
         local value = data.selected_value or ""
         if entry.textbox:GetString() ~= value then
             entry.textbox:SetString(value)

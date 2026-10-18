@@ -29,7 +29,7 @@ class BotLifecycleTest(unittest.TestCase):
             end} end
             package.preload.ai_provider = function() return {new=function(base,model,key)
                 return {Complete=function(self,messages,callback)
-                    requests[#requests+1]={messages=messages,callback=callback,key=key}
+                    requests[#requests+1]={messages=messages,callback=callback,key=key,base=base,model=model}
                 end}
             end} end
             config={ai_count=1, ai_1_api_key="fixture-key", ai_2_api_key="fixture-key", ai_3_api_key="fixture-key", ai_4_api_key="fixture-key", ai_5_api_key="fixture-key"}
@@ -124,6 +124,53 @@ class BotLifecycleTest(unittest.TestCase):
             assert(manager.by_index[3].prefab=="woodie" and manager.by_index[1].prefab=="willow")
             assert(manager.slots[2].status=="selecting")
             assert(#snapshots[#snapshots]==5)
+        ''')
+
+    def test_independent_providers_used_for_selection_and_actions(self):
+        lua = self.runtime(count=2, existing_human=True)
+        lua.execute('''
+            config.ai_1_api_base_url="https://relay.example/v1"
+            config.ai_1_model="relay-model"
+            config.ai_2_api_base_url="https://api.openai.com/v1"
+            config.ai_2_model="gpt-4o-mini"
+            advance(2)
+            assert(#requests==2)
+            assert(requests[1].base==config.ai_1_api_base_url and requests[1].model==config.ai_1_model)
+            assert(requests[2].base==config.ai_2_api_base_url and requests[2].model==config.ai_2_model)
+            requests[1].callback('{"character":"willow"}',nil)
+            requests[2].callback('{"character":"wilson"}',nil)
+            advance(1)
+            assert(#requests==4)
+            for i=1,2 do
+                assert(requests[i+2].base==requests[i].base and requests[i+2].model==requests[i].model)
+                assert(requests[i+2].key==requests[i].key)
+            end
+        ''')
+
+    def test_blank_settings_keep_legacy_values_without_overriding_explicit_fields(self):
+        lua = self.runtime(count=2, existing_human=True)
+        lua.execute('''
+            config.api_base_url="https://previous.example/v1"
+            config.model="previous-model"
+            config.ai_1_api_base_url="https://new.example/v1"
+            config.ai_1_model=""
+            config.ai_2_api_base_url=""
+            config.ai_2_model="new-model"
+            advance(2)
+            assert(requests[1].base=="https://new.example/v1" and requests[1].model=="previous-model")
+            assert(requests[2].base=="https://previous.example/v1" and requests[2].model=="new-model")
+        ''')
+
+    def test_direct_spawn_uses_own_provider_and_builtin_defaults(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            config.ai_2_api_base_url="https://direct.example/v1"
+            config.ai_2_model="direct-model"
+            manager:SpawnOne(2,"direct-key",AllPlayers[1],"willow")
+            advance(2)
+            assert(requests[1].base=="https://direct.example/v1" and requests[1].model=="direct-model")
+            assert(requests[1].key=="direct-key")
+            assert(requests[2].base=="https://api.openai.com/v1" and requests[2].model=="gpt-4o-mini")
         ''')
 
     def test_selection_timeout_falls_back_once_and_ignores_late_reply(self):

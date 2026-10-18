@@ -175,16 +175,28 @@ MOD_NAME = "ai_players"
 CONFIG = {
     {name="ai_count", label="AI count", default=0, saved=0,
      options={{description="0", data=0}, {description="1", data=1}}},
-    {name="ai_1_api_key", label="AI 1 key", default="", saved="", options={{description="", data=""}}},
-    {name="ai_2_api_key", label="AI 2 key", default="", saved="", options={{description="", data=""}}},
-    {name="ai_3_api_key", label="AI 3 key", default="", saved="", options={{description="", data=""}}},
-    {name="ai_4_api_key", label="AI 4 key", default="", saved="", options={{description="", data=""}}},
-    {name="ai_5_api_key", label="AI 5 key", default="", saved="", options={{description="", data=""}}},
-    {name="api_base_url", label="Base URL", default="https://api.openai.com/v1", saved="https://api.openai.com/v1", options={{description="OpenAI", data="https://api.openai.com/v1"}}},
-    {name="model", label="Model", default="gpt-4o-mini", saved="gpt-4o-mini", options={{description="Model", data="gpt-4o-mini"}}},
-    {name="request_interval", label="Interval", default=30, saved=30,
-     options={{description="30", data=30}, {description="60", data=60}}},
 }
+for index = 1, 5 do
+    for _, field in ipairs({"api_base_url", "api_key", "model"}) do
+        table.insert(CONFIG, {
+            name="ai_" .. index .. "_" .. field,
+            label="AI " .. index .. " " .. field,
+            default="", saved="", options={{description="", data=""}},
+        })
+    end
+end
+table.insert(CONFIG, {
+    name="request_interval", label="Interval", default=30, saved=30,
+    options={{description="30", data=30}, {description="60", data=60}},
+})
+table.insert(CONFIG, {
+    name="api_base_url", label="Legacy URL", default="https://api.openai.com/v1",
+    saved="https://legacy.example/v1", options={{description="OpenAI", data="https://api.openai.com/v1"}},
+})
+table.insert(CONFIG, {
+    name="model", label="Legacy model", default="gpt-4o-mini", saved="legacy-model",
+    options={{description="Model", data="gpt-4o-mini"}},
+})
 SAVED = nil
 SAVE_COUNT = 0
 KnownModIndex = {
@@ -289,10 +301,16 @@ class ConfigUIScreenTest(unittest.TestCase):
         screen = self.require("screens/redux/modconfigurationscreen")("ai_players", True)
         self.assertFalse(screen.client_config, "settings must reach the server, not the CLIENT file")
         rows = list(screen.options_scroll_list.rows.values())
-        self.assertEqual(len([row for row in rows if row.ai_option_data is not None]), 2)
+        self.assertEqual(len([row for row in rows if row.ai_option_data is not None]), 0)
         count_row = next(row for row in rows if row.opt.data is not None
                          and row.opt.data.option.name == "ai_count")
         count_row.opt.spinner.OnChanged(count_row.opt.spinner, 3)
+        displayed = screen.options_scroll_list["items"]
+        expected = [f"ai_{i}_{field}" for i in range(1, 4)
+                    for field in ("api_base_url", "api_key", "model")]
+        self.assertEqual([displayed[i].option.name for i in range(1, len(displayed) + 1)],
+                         ["ai_count", *expected, "request_interval"])
+        self.assertEqual(len([row for row in rows if row.ai_option_data is not None]), 9)
         keys = [row for row in rows if row.ai_option_data is not None
                 and row.ai_option_data.option.name.endswith("_api_key")]
         self.assertEqual(len(keys), 3)
@@ -311,7 +329,7 @@ class ConfigUIScreenTest(unittest.TestCase):
         self.assertTrue(other.client_config)
         self.assertFalse(other.ai_players_configured or False)
 
-    def test_key_fields_follow_ai_count_without_losing_values(self) -> None:
+    def test_fields_follow_ai_count_without_losing_values(self) -> None:
         self.lua.execute('''
             function AddClassPostConstruct(path, callback)
                 local cls = require(path)
@@ -335,13 +353,18 @@ class ConfigUIScreenTest(unittest.TestCase):
             count_row = next(row for _, row in screen.options_scroll_list.rows.items()
                              if row.opt.data is not None and row.opt.data.option.name == "ai_count")
             count_row.opt.spinner.OnChanged(count_row.opt.spinner, count)
-            keys = [row for row in visible() if row.ai_option_data.option.name.endswith("_api_key")]
-            self.assertEqual(len(keys), count)
-            self.assertEqual({row.ai_option_data.option.name for row in keys},
-                             {f"ai_{i}_api_key" for i in range(1, count + 1)})
-            for row in keys:
+            expected_names = [f"ai_{i}_{field}" for i in range(1, count + 1)
+                              for field in ("api_base_url", "api_key", "model")]
+            self.assertEqual(len(visible()), count * 3)
+            displayed = screen.options_scroll_list["items"]
+            self.assertEqual([displayed[i].option.name for i in range(1, len(displayed) + 1)],
+                             ["ai_count", *expected_names, "request_interval"])
+            self.assertEqual({row.ai_option_data.option.name for row in visible()},
+                             set(expected_names))
+            for row in visible():
                 name = row.ai_option_data.option.name
                 entry = row.ai_text_entry.textbox
+                self.assertEqual(entry.password, name.endswith("_api_key"))
                 value = "fixture-" + name
                 if entry.GetString(entry):
                     self.assertEqual(entry.GetString(entry), value)
@@ -393,16 +416,16 @@ class ConfigUIScreenTest(unittest.TestCase):
                          if r.opt.data is not None and r.opt.data.option.name == "ai_count")
         count_row.opt.spinner.OnChanged(count_row.opt.spinner, 5)
 
-        # All five keys, including duplicate values and clearing an empty key, commit
-        # through the text-entry callback and mark the native screen dirty.
+        # Each bot has its own URL/model; keys may duplicate or remain empty.
         values = {
-            "ai_1_api_key": "shared-secret",
-            "ai_2_api_key": "shared-secret",
-            "ai_3_api_key": "",
-            "ai_4_api_key": "fourth-secret",
-            "ai_5_api_key": "fifth-secret",
-            "api_base_url": "https://gateway.example/v1",
-            "model": "custom-model",
+            f"ai_{index}_{field}": value
+            for index in range(1, 6)
+            for field, value in (
+                ("api_base_url", f"https://gateway-{index}.example/v1"),
+                ("api_key", "shared-secret" if index < 3 else
+                 "" if index == 3 else f"secret-{index}"),
+                ("model", f"custom-model-{index}"),
+            )
         }
         for name, value in values.items():
             entry = row(name).ai_text_entry.textbox
@@ -412,7 +435,8 @@ class ConfigUIScreenTest(unittest.TestCase):
             self.assertTrue(row(name).ai_option_data.selected_value == value)
         self.assertTrue(screen.IsDirty(screen))
         self.assertTrue(row("ai_1_api_key").ai_text_entry.textbox.password)
-        self.assertFalse(row("model").ai_text_entry.textbox.password)
+        self.assertFalse(row("ai_1_api_base_url").ai_text_entry.textbox.password)
+        self.assertFalse(row("ai_1_model").ai_text_entry.textbox.password)
 
         # RefreshView recycles the native rows but must retain every edited value.
         screen.options_scroll_list.RefreshView(screen.options_scroll_list)
@@ -420,24 +444,41 @@ class ConfigUIScreenTest(unittest.TestCase):
             self.assertEqual(row(name).ai_text_entry.textbox.GetString(row(name).ai_text_entry.textbox), value)
             self.assertEqual(row(name).ai_option_data.option.value, value)
 
-        # A recycled row switches back to its spinner, then binds a text option again.
+        # Recycle a password row into plain URL/model fields and a spinner.
         recycled = row("ai_1_api_key")
         grid = screen.options_scroll_list
+        self.assertTrue(recycled.ai_text_entry.textbox.password)
+        grid.update_fn(None, recycled, screen.optionwidgets[2], 2)
+        self.assertTrue(recycled.ai_text_entry.shown)
+        self.assertFalse(recycled.ai_text_entry.textbox.password)
+        self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox),
+                         values["ai_1_api_base_url"])
+        grid.update_fn(None, recycled, screen.optionwidgets[4], 4)
+        self.assertFalse(recycled.ai_text_entry.textbox.password)
+        self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox),
+                         values["ai_1_model"])
         grid.update_fn(None, recycled, screen.optionwidgets[1], 1)
         self.assertFalse(recycled.ai_text_entry.shown)
         self.assertTrue(recycled.opt.spinner.shown)
-        grid.update_fn(None, recycled, screen.optionwidgets[2], 2)
+        grid.update_fn(None, recycled, screen.optionwidgets[3], 3)
         self.assertTrue(recycled.ai_text_entry.shown)
+        self.assertTrue(recycled.ai_text_entry.textbox.password)
         self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox), values["ai_1_api_key"])
 
-        # Apply and reopen with persisted arbitrary strings, including duplicate keys.
+        # Apply with bots 3-5 hidden, then reopen and reveal their retained values.
+        count_row.opt.spinner.OnChanged(count_row.opt.spinner, 2)
         screen.Apply(screen)
         self.assertEqual(self.lua.globals().SAVE_COUNT, 1)
         saved = {item.name: item.saved for _, item in self.lua.globals().SAVED.items()}
+        self.assertEqual(saved["api_base_url"], "https://legacy.example/v1")
+        self.assertEqual(saved["model"], "legacy-model")
         for name, value in values.items():
             self.assertEqual(saved[name], value)
         screen = self.require("screens/redux/modconfigurationscreen")("ai_players", False)
         hooks[0][1](screen, "ai_players")
+        count_row = next(r for _, r in screen.options_scroll_list.rows.items()
+                         if r.opt.data is not None and r.opt.data.option.name == "ai_count")
+        count_row.opt.spinner.OnChanged(count_row.opt.spinner, 5)
         for name, value in values.items():
             self.assertEqual(row(name).ai_text_entry.textbox.GetString(row(name).ai_text_entry.textbox), value)
 
@@ -447,11 +488,11 @@ class ConfigUIScreenTest(unittest.TestCase):
         popup = self.lua.globals().TheFrontEnd.pushed
         self.assertIsNotNone(popup)
         popup.buttons[1].cb()
-        self.assertFalse(any(r.ai_option_data is not None and
-                             r.ai_option_data.option.name.endswith("_api_key")
+        self.assertFalse(any(r.ai_option_data is not None
                              for _, r in screen.options_scroll_list.rows.items()))
-        self.assertEqual(row("api_base_url").ai_text_entry.textbox.GetString(row("api_base_url").ai_text_entry.textbox), "https://api.openai.com/v1")
-        self.assertEqual(row("model").ai_text_entry.textbox.GetString(row("model").ai_text_entry.textbox), "gpt-4o-mini")
+        reset_values = {item.name: item.saved for _, item in screen.CollectSettings(screen).items()}
+        for name in values:
+            self.assertEqual(reset_values[name], "")
 
         # Apply persists native CollectSettings output, including empty and duplicate keys.
         screen.Apply(screen)
@@ -465,8 +506,11 @@ class ConfigUIScreenTest(unittest.TestCase):
         # A fresh screen proves Cancel does not invoke persistence after an edit.
         second = self.require("screens/redux/modconfigurationscreen")("ai_players", False)
         hooks[0][1](second, "ai_players")
+        second_count = next(r for _, r in second.options_scroll_list.rows.items()
+                            if r.opt.data is not None and r.opt.data.option.name == "ai_count")
+        second_count.opt.spinner.OnChanged(second_count.opt.spinner, 1)
         second_row = next(r for _, r in second.options_scroll_list.rows.items()
-                          if r.ai_option_data and r.ai_option_data.option.name == "model")
+                          if r.ai_option_data and r.ai_option_data.option.name == "ai_1_model")
         second_row.ai_text_entry.textbox.SetString(second_row.ai_text_entry.textbox, "discard-me")
         second_row.ai_text_entry.textbox.OnTextInputted(second_row.ai_text_entry.textbox)
         second.Cancel(second)

@@ -8,8 +8,10 @@ $bridge = Get-Content (Join-Path $root 'tools\ai_http_bridge.py') -Raw
 if ($modInfo -notmatch 'name = "AI Players"') { throw 'missing mod name' }
 if ($modInfo -notmatch 'name = "ai_count"') { throw 'missing ai_count option' }
 foreach ($i in 1..5) {
-    $option = 'name = "ai_' + $i + '_api_key"'
-    if ($modInfo -notmatch [regex]::Escape($option)) { throw "missing ai_${i}_api_key option" }
+    foreach ($field in @('api_base_url', 'api_key', 'model')) {
+        $option = 'name = "ai_' + $i + '_' + $field + '"'
+        if ($modInfo -notmatch [regex]::Escape($option)) { throw "missing ai_${i}_${field} option" }
+    }
 }
 if ($manager -notmatch 'safe_config\(self, "ai_"') { throw 'manager does not read per-AI keys' }
 if ($manager -notmatch 'math\.min\(MAX_PLAYERS') { throw 'AI count is not capped' }

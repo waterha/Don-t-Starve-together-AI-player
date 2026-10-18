@@ -1,16 +1,16 @@
 # AI Players for Don't Starve Together
 
-This server-authoritative mod adds up to five AI bots. When a human enters a new world or resumes an existing save with the mod enabled, bots appear as **[AI]** entries in the in-game player list, choose their own character through the configured model, enter the world and run basic autonomous survival actions. Each bot may use a separate API key; repeated keys are supported.
+This server-authoritative mod adds up to five AI bots. When a human enters a new world or resumes an existing save with the mod enabled, bots appear as **[AI]** entries in the in-game player list, choose their own character through the configured model, enter the world and run basic autonomous survival actions. Each bot has its own API URL, API key and model name, so different providers can be used together; repeated keys are supported.
 
 These are mod-controlled bots. Their rows extend the in-game list; they are not separate Steam/WeGame connections, do not occupy authenticated client slots, and do not appear as connections in the external server browser.
 
 ## Configure in game
 
 1. Install the main mod as usual. For editable settings in the **Installed Mods** menu before the server mod is enabled, copy the contents of `client_config_helper` to a separate sibling folder, `mods/ai_players_config`, enable **AI Players Config** as a client mod, and restart once. The helper must be a separate mod, not a nested folder inside AI Players. Local development installs may instead add `ForceEnableMod("ai_players_config")` to the game's `mods/modsettings.lua`; remove that line to stop automatically loading the helper.
-2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many API key input boxes appear immediately; at zero, none appear.
-3. Click each **AI N API key** text box and type or paste the key. Characters are masked. Keys may be repeated. Reducing the count hides unused key fields and preserves their values for later reuse.
-4. Edit **API base URL** and **Model** to match your OpenAI-compatible provider.
-5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible key count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible key fields.
+2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many groups appear, each with **AI N API URL**, **AI N API key** and **AI N Model**; at zero, no provider fields appear.
+3. Fill each AI's URL, key and model separately. For example, AI 1 can use a relay's URL/key/model while AI 2 uses `https://api.openai.com/v1`, its OpenAI key and `gpt-4o-mini`. Both endpoints must support OpenAI-compatible chat completions. Only keys are masked; URL and model text remain visible. Reducing the count hides unused groups and preserves all three values for reuse.
+4. Blank URL/model fields fall back to the old shared settings for upgraded saves, or `https://api.openai.com/v1` and `gpt-4o-mini` for a fresh setup. Explicit per-AI values always take precedence; one AI's values never become another AI's defaults. The former shared URL/model rows are hidden.
+5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible group count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible provider fields.
 
 6. Start the API bridge on the computer running the world server. On Windows, double-click `tools/start_ai_bridge.cmd` and keep its console open; it needs Python 3 and no extra packages. Alternatively run `python tools/ai_http_bridge.py` (`python3` on Linux). It listens only at `http://127.0.0.1:17893`; check `http://127.0.0.1:17893/health` for `{"ok":true}`. A remote dedicated server needs its own bridge on that server.
 7. Enable **AI Players** in the world's **server mods**, start/resume the world, and enter with your character. Open the in-game player list: each configured bot first shows **Selecting**, then its chosen character and **Alive** once it enters nearby. A dead bot shows **Dead**. Bots pursue their own food/material/light needs rather than following by default. Loading only **AI Players Config** enables editing but does not start bots. For an existing save, enable the server mod before resuming; no new world is required.
@@ -28,8 +28,8 @@ Keys are masked on screen but saved as normal DST configuration strings, without
 1. Copy this Mod directory into the server's `mods` directory.
 2. Enable the Mod in the server's `modoverrides.lua`.
 3. Set `ai_count` between `0` and `5`.
-4. Fill the corresponding API keys. A key can be repeated for multiple AI players.
-5. Set `api_base_url` and `model` if your provider is OpenAI-compatible.
+4. Fill `ai_N_api_base_url`, `ai_N_api_key` and `ai_N_model` for each AI. A key can be repeated for multiple AI players.
+5. Each URL must provide OpenAI-compatible chat completions. Different AIs can use different providers and model names.
 6. Start `python tools/ai_http_bridge.py` on this server before entering the world.
 
 Example `modoverrides.lua` entry:
@@ -40,13 +40,12 @@ return {
         enabled = true,
         configuration_options = {
             ai_count = 2,
-            ai_1_api_key = "REPLACE_WITH_SERVER_SECRET_1",
-            ai_2_api_key = "REPLACE_WITH_SERVER_SECRET_1",
-            ai_3_api_key = "",
-            ai_4_api_key = "",
-            ai_5_api_key = "",
-            api_base_url = "https://api.openai.com/v1",
-            model = "gpt-4o-mini",
+            ai_1_api_base_url = "https://relay.example/v1",
+            ai_1_api_key = "REPLACE_WITH_RELAY_SECRET",
+            ai_1_model = "REPLACE_WITH_RELAY_MODEL_NAME",
+            ai_2_api_base_url = "https://api.openai.com/v1",
+            ai_2_api_key = "REPLACE_WITH_OPENAI_SECRET",
+            ai_2_model = "gpt-4o-mini",
             request_interval = 30,
         },
     },

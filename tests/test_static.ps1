@@ -15,7 +15,7 @@ foreach ($i in 1..5) {
 }
 if ($manager -notmatch 'safe_config\(self, "ai_"') { throw 'manager does not read per-AI keys' }
 if ($manager -notmatch 'math\.min\(MAX_PLAYERS') { throw 'AI count is not capped' }
-if ($manager -notmatch 'SpawnPrefab, "wilson"') { throw 'AI spawn path missing' }
+if ($manager -notmatch 'pcall\(SpawnPrefab, character\)' -or $manager -notmatch 'MODCHARACTERLIST') { throw 'registered character spawn path missing' }
 if ($bridge -notmatch 'Authorization') { throw 'authorization header missing' }
 if ($bridge -notmatch '/chat/completions') { throw 'chat completion endpoint missing' }
 if ($provider -notmatch '127\.0\.0\.1:17893/complete') { throw 'local bridge endpoint missing' }

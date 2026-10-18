@@ -1,7 +1,7 @@
 name = "AI Players"
 description = "Adds up to five AI bots with independent model providers, character selection and basic autonomous survival."
 author = "waterha"
-version = "0.2.2"
+version = "0.2.3"
 ai_players_config_ui = true
 forumthread = ""
 api_version = 10

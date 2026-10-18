@@ -29,6 +29,14 @@ The local survival loop checks every **0.25 seconds**, independently of HTTP/mod
 
 The bridge also reports invalid configuration by field (`invalid base_url`, `invalid api_key`, `invalid model`, or `invalid messages`) without echoing submitted values. Leading/trailing whitespace on URL, key and model is removed; internal key control characters remain rejected. Repeated validation errors mean requests are failing, not merely responding slowly. Check configuration before selecting a shorter interval.
 
+## Autonomous Names and Mod Characters
+
+Before entering the world, each AI chooses its display name and character in the same selection request; naming adds no extra request. Its roster entry becomes `[AI] Chosen name`, and later model observations include that name. UTF-8 names, including Chinese, are supported. Control characters and surrounding whitespace are removed, with a limit of 48 characters. Missing or invalid names fall back to `AI N` without discarding a valid character choice.
+
+Candidates come from the world's built-in character list and `AddModCharacter` registrations, intersected with loaded prefabs instead of the previous nine-character list. Removed default characters, internal transformation-only characters and unloaded prefabs are excluded. **Character mods must be enabled for this world, not merely installed, and clients must load them as required by those mods.** This mod does not download or enable other mods automatically.
+
+Invalid or timed-out choices use an available fallback. Failed mod-character spawning tries an available safe default; with no available character, no bot is spawned. Names and characters are chosen again each world session rather than persisted. Generic survival behavior does not implement every mod character's special abilities. Characters requiring real clients or custom initialization may be incompatible; third-party character mods have not each been validated in game.
+
 ## API key storage
 
 Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server sends each request and key to its loopback bridge, which forwards the key only as Authorization to your configured API URL. The bridge logs no request bodies or credentials. The mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
@@ -67,7 +75,7 @@ Use your actual local mod folder name as the entry key. After publishing to Work
 ## Bot lifecycle and current behavior
 
 - The surface server clamps the configured count to 0-5 and starts after the first living human enters. The same path handles a new world and enabling the mod before resuming an existing save.
-- Each configured key creates an **[AI] AI N** player-list row in **Selecting** state. The model chooses independently from supported base characters. After selection, the character spawns on safe ground near the human and the row changes to **Alive**. Duplicate human/bot join events do not create duplicate bots. Missing keys skip their bot.
+- Each configured key creates an **[AI] AI N** player-list row in **Selecting** state. The model independently chooses a name and an available built-in or enabled mod character. After selection, the character spawns on safe ground near the human and the row changes to **Alive**. Duplicate human/bot join events do not create duplicate bots. Missing keys skip their bot.
 - If selection fails, returns an unsupported character or exceeds 60 seconds, a supported default character is used. This fallback is logged. A disconnected human delays entry until a human returns. There is no requirement to run or click through an additional real client's character-selection screen.
 - The model receives health, hunger, sanity, inventory counts, equipment, nearby usable resources and GUIDs, threats, light, phase and available item recipes. It can request gathering, eating, item crafting/equipping, chopping/mining with owned tools, wandering, speech, waiting, following or attacking non-player targets.
 - The local quarter-second survival loop avoids imminent attackers, eats suitable owned food when hungry, gathers food and bounded grass/twig supplies, and crafts/equips a torch using actual ingredients. Pending movement/work and busy stategraph actions are preserved. Bots have no free supplies, health or invincibility. Model failures leave this local behavior running.

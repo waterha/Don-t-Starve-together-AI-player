@@ -8,9 +8,9 @@ local MAX_PAYLOAD = 4096
 local DIRTY_EVENT = "ai_players_roster_dirty"
 local VALID_STATUS = { selecting = true, alive = true, dead = true }
 
-local function clean_name(value, index)
+local function clean_name(value, index, fallback)
     if type(value) ~= "string" then
-        return "Bot " .. index
+        return fallback or "Bot " .. index
     end
     local chars = {}
     -- Keep complete UTF-8 characters, dropping control bytes and excessive names.
@@ -22,9 +22,11 @@ local function clean_name(value, index)
             end
         end
     end
-    local name = table.concat(chars)
-    return name ~= "" and name or "Bot " .. index
+    local name = table.concat(chars):match("^%s*(.-)%s*$")
+    return name ~= "" and name or fallback or "Bot " .. index
 end
+
+Roster.CleanName = clean_name
 
 local function sanitize(slots)
     local result, seen = {}, {}
@@ -38,7 +40,7 @@ local function sanitize(slots)
                 and index == math.floor(index) and not seen[index]
                 and VALID_STATUS[slot.status] then
                 local character = type(slot.character) == "string" and slot.character or ""
-                if #character > 32 or character:find("[^a-z0-9_]") then
+                if #character > 128 or character:find("[^%w_%-]") then
                     character = ""
                 end
                 local record = {
@@ -213,11 +215,34 @@ local function configure_screen(screen)
     end
 end
 
-function Roster.Register(add_prefab_post_init, add_class_post_construct)
+local NAME_DIRTY_EVENT = "ai_players_name_dirty"
+
+local function attach_player_name(inst)
+    if inst._ai_players_name ~= nil then return end
+    inst._ai_players_name = net_string(inst.GUID, "ai_players.display_name", NAME_DIRTY_EVENT)
+    local function refresh_name()
+        local name = inst._ai_players_name:value()
+        if name ~= "" then inst.name = name end
+    end
+    inst:ListenForEvent(NAME_DIRTY_EVENT, refresh_name)
+    inst:DoTaskInTime(0, refresh_name)
+end
+
+function Roster.SetName(inst, value, index)
+    local name = clean_name(value, index, "AI " .. index)
+    if TheWorld == nil or not TheWorld.ismastersim then return false end
+    inst.name = name
+    if inst._ai_players_name ~= nil then inst._ai_players_name:set(name) end
+    if inst.components.named ~= nil then inst.components.named:SetName(name) end
+    return true
+end
+
+function Roster.Register(add_prefab_post_init, add_class_post_construct, add_player_post_init)
     if registered then
         return
     end
     registered = true
+    if add_player_post_init then add_player_post_init(attach_player_name) end
     add_prefab_post_init("forest_network", attach_network)
     add_prefab_post_init("cave_network", attach_network)
     add_class_post_construct("screens/playerstatusscreen", configure_screen)

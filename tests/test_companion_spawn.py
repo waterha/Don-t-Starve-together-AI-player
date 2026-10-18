@@ -65,6 +65,7 @@ class BotLifecycleTest(unittest.TestCase):
                 function e.Transform:SetPosition(px,py,pz) x,z=px,pz end
                 function e:DoTaskInTime(delay,fn) return schedule(delay,function() fn(self) end) end
                 function e:ListenForEvent(event,fn) self.listeners[event]=fn end
+                e.components.named={SetName=function(self,value) self.value=value end}
                 e.components.talker={Say=function() end}
                 e.components.locomotor={GoToEntity=function() end,GoToPoint=function() end,Stop=function() end}
                 return e
@@ -84,9 +85,94 @@ class BotLifecycleTest(unittest.TestCase):
         lua.globals().config.ai_count = count
         if existing_human:
             lua.execute('human(120,240)')
+        roster = lua.execute((ROOT / 'scripts/ai_players_roster.lua').read_text(encoding='utf-8'))
+        lua.eval('require("ai_players_roster")').CleanName = roster.CleanName
+        lua.eval('require("ai_players_roster")').SetName = roster.SetName
         lua.globals().Manager = lua.execute((ROOT / 'scripts/ai_player_manager.lua').read_text(encoding='utf-8'))
         lua.execute('manager=Manager.new(function(name) return config[name] end); manager:Start()')
         return lua
+
+    def test_chooses_name_and_registered_mod_character(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            DST_CHARACTERLIST={"wilson","willow","wanda","wonkey"}
+            MODCHARACTERLIST={"mod_survivor","mod_survivor","missing_mod"}
+            MODCHARACTEREXCEPTIONS_DST={"willow"}
+            SEAMLESSSWAP_CHARACTERLIST={"wonkey"}
+            Prefabs={wilson={},willow={},wanda={},wonkey={},mod_survivor={}}
+            advance(2)
+            local prompt=requests[1].messages[1].content
+            assert(prompt:find("mod_survivor",1,true) and prompt:find("wanda",1,true))
+            assert(not prompt:find("missing_mod",1,true) and not prompt:find("wonkey",1,true))
+            requests[1].callback('{"name":"星河","character":"mod_survivor"}',nil)
+            assert(spawned[1].prefab=="mod_survivor" and spawned[1].name=="星河")
+            assert(spawned[1].components.named.value=="星河")
+            assert(manager.slots[1].name=="星河" and snapshots[#snapshots][1].name=="星河")
+            assert(spawned[1].userid=="")
+        ''')
+
+    def test_bad_name_is_bounded_and_invalid_character_keeps_valid_name(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('advance(2)')
+        lua.globals().requests[1].callback(json.dumps({"name": "  小雨\n" + "星" * 80, "character": "dragonfly"}), None)
+        self.assertEqual(lua.eval('spawned[1].prefab'), 'wilson')
+        chosen = lua.eval('spawned[1].name')
+        self.assertTrue(chosen.startswith('小雨'))
+        self.assertNotIn('\n', chosen)
+        self.assertLessEqual(len(chosen), 48)
+        self.assertEqual(lua.eval('snapshots[#snapshots][1].name'), chosen)
+
+    def test_mod_spawn_failure_falls_back_without_losing_name(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            MODCHARACTERLIST={"broken_mod"}; Prefabs={wilson={},broken_mod={}}
+            local native_spawn=SpawnPrefab
+            function SpawnPrefab(prefab)
+                if prefab=="broken_mod" then error("fixture mod constructor failed") end
+                return native_spawn(prefab)
+            end
+            advance(2)
+            requests[1].callback('{"name":"River","character":"broken_mod"}',nil)
+            assert(#spawned==1 and spawned[1].prefab=="wilson" and spawned[1].name=="River")
+            assert(snapshots[#snapshots][1].character=="wilson")
+        ''')
+
+    def test_removed_unregistered_and_internal_characters_are_rejected(self):
+        for character in ('willow', 'missing_mod', 'wonkey', 'dragonfly'):
+            with self.subTest(character=character):
+                lua = self.runtime(existing_human=True)
+                lua.execute('''
+                    DST_CHARACTERLIST={"wilson","willow","wonkey"}
+                    MODCHARACTERLIST={"missing_mod"}
+                    MODCHARACTEREXCEPTIONS_DST={"willow"}
+                    SEAMLESSSWAP_CHARACTERLIST={"wonkey"}
+                    Prefabs={wilson={},willow={},wonkey={},dragonfly={}}
+                    advance(2)
+                ''')
+                lua.globals().requests[1].callback(json.dumps({"name": "River", "character": character}), None)
+                self.assertEqual(lua.eval('spawned[1].prefab'), 'wilson')
+
+    def test_long_mod_id_is_canonicalized_like_native_spawn(self):
+        lua = self.runtime(existing_human=True)
+        identifier = 'mod_' + 'survivor_' * 6 + 'special-build'
+        lua.globals().mod_id = identifier
+        lua.execute('''
+            DST_CHARACTERLIST={}; MODCHARACTERLIST={string.upper(mod_id)}
+            Prefabs={[mod_id]={}}
+            advance(2)
+            assert(requests[1].messages[1].content:find(mod_id,1,true))
+        ''')
+        lua.globals().requests[1].callback(json.dumps({'name': 'River', 'character': identifier}), None)
+        self.assertEqual(lua.eval('spawned[1].prefab'), identifier)
+
+    def test_no_available_character_does_not_spawn_unregistered_default(self):
+        lua = self.runtime(existing_human=True)
+        lua.execute('''
+            DST_CHARACTERLIST={"wilson"}; MODCHARACTEREXCEPTIONS_DST={"wilson"}; Prefabs={}
+            advance(2)
+            requests[1].callback('{"name":"River","character":"wilson"}',nil)
+            assert(#spawned==0 and manager.slots[1].status=="dead")
+        ''')
 
     def test_local_reaction_cadence_is_independent_of_slow_model(self):
         lua = self.runtime(existing_human=True)

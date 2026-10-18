@@ -63,8 +63,32 @@ local function nearby(inst)
     return TheSim:FindEntities(x, y, z, 12, nil, { "INLIMBO", "FX", "DECOR" })
 end
 
-local function permitted_character(name)
-    for _, character in ipairs(CHARACTERS) do
+local function character_choices()
+    local choices, seen, excluded = {}, {}, {}
+    for _, list in ipairs({MODCHARACTEREXCEPTIONS_DST or {}, SEAMLESSSWAP_CHARACTERLIST or {}}) do
+        for _, name in ipairs(list) do
+            if type(name) == "string" then excluded[name:lower()] = true end
+        end
+    end
+    local function add(list, modded)
+        for _, name in ipairs(list or {}) do
+            if type(name) == "string" then name = name:lower() end
+            if type(name) == "string" and #name <= 128 and name:match("^[%w_%-]+$")
+                and not seen[name] and not excluded[name]
+                and (Prefabs == nil and not modded or Prefabs ~= nil and Prefabs[name] ~= nil) then
+                seen[name] = true
+                choices[#choices + 1] = name
+            end
+        end
+    end
+    -- Read at selection time, after every enabled character mod has registered.
+    add(DST_CHARACTERLIST or CHARACTERS, false)
+    add(MODCHARACTERLIST, true)
+    return choices
+end
+
+local function permitted_character(name, choices)
+    for _, character in ipairs(choices or character_choices()) do
         if character == name then return character end
     end
 end
@@ -78,7 +102,7 @@ function AIPlayerManager:PublishRoster()
     for index = 1, self.count or 0 do
         local slot = self.slots[index]
         if slot then
-            records[#records + 1] = { index = index, name = "AI " .. index, status = slot.status,
+            records[#records + 1] = { index = index, name = slot.name or "AI " .. index, status = slot.status,
                 character = slot.character, GUID = slot.inst and slot.inst:IsValid() and slot.inst.GUID or nil }
         end
     end
@@ -89,17 +113,23 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     owner = is_human(owner) and owner or find_human()
     if not owner then return end
     local slot = self.slots[index]
-    character = permitted_character(character) or "wilson"
-    local ok, inst = pcall(SpawnPrefab, character)
+    local choices = character_choices()
+    character = permitted_character(character, choices) or choices[1]
+    local fallback = permitted_character("wilson", choices) or choices[1]
+    local ok, inst = false, nil
+    if character then ok, inst = pcall(SpawnPrefab, character) end
     if not ok or not inst then
-        if character ~= "wilson" then ok, inst = pcall(SpawnPrefab, "wilson"); character = "wilson" end
+        if fallback and character ~= fallback then
+            ok, inst = pcall(SpawnPrefab, fallback)
+            character = fallback
+        end
         if not ok or not inst then
             if slot then slot.status = "dead"; self:PublishRoster() end
             print(string.format("[AI Players] AI %d could not spawn", index))
             return
         end
     end
-    inst.name = "AI " .. index
+    Roster.SetName(inst, slot and slot.name, index)
     inst:AddTag("ai_player")
     inst:AddTag("companion")
     inst.persists = false
@@ -125,7 +155,7 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
         end)
     end
     self:PublishRoster()
-    say(inst, "AI " .. index .. ": " .. character .. ". I'll find food and prepare for night.")
+    say(inst, inst.name .. ": " .. character .. ". I'll find food and prepare for night.")
     print(string.format("[AI Players] AI %d entered as %s", index, character))
     -- An immediate decision complements the local survival loop; later calls use the configured interval.
     inst:DoTaskInTime(1, function() if alive(inst) then self:Think(inst) end end)
@@ -135,16 +165,19 @@ function AIPlayerManager:BeginSelection(index)
     local slot = self.slots[index]
     if not slot or slot.selecting_started or slot.status ~= "selecting" then return end
     slot.selecting_started = true
+    local choices = character_choices()
     local finished, timeout = false, nil
     local function finish(content, err)
         if finished then return end
         finished = true
         if timeout then timeout:Cancel() end
         local ok, result = pcall(json.decode, content or "")
-        local selected = ok and type(result) == "table" and permitted_character(result.character) or nil
+        result = ok and not err and type(result) == "table" and result or {}
+        local selected = permitted_character(result.character, choices)
+        slot.name = Roster.CleanName(result.name, index, "AI " .. index)
         if not selected then
-            selected = CHARACTERS[((index - 1) % #CHARACTERS) + 1]
-            print(string.format("[AI Players] AI %d character selection unavailable; using %s", index, selected))
+            selected = choices[((index - 1) % math.max(1, #choices)) + 1]
+            print(string.format("[AI Players] AI %d character selection unavailable; using %s", index, selected or "no available character"))
         end
         slot.character = selected
         -- A disconnected human does not leave an unseen bot at the origin.
@@ -157,7 +190,7 @@ function AIPlayerManager:BeginSelection(index)
     end
     timeout = TheWorld:DoTaskInTime(60, function() finish(nil, "selection timed out") end)
     slot.provider:Complete({
-        { role = "system", content = 'Choose your own playable character. Return ONLY JSON {"character":"prefab"}. Allowed: ' .. table.concat(CHARACTERS, ", ") .. '. Prefer a character suitable for autonomous survival. Do not return an action.' },
+        { role = "system", content = 'Choose your own display name and playable character. Return ONLY JSON {"name":"your name","character":"prefab"}. Names may use Chinese or another language; use a short name of at most 48 characters, without control characters. Allowed character prefabs (including enabled character mods): ' .. table.concat(choices, ", ") .. '. Choose exactly one allowed prefab. Prefer a character suitable for autonomous survival. Do not return an action.' },
         { role = "user", content = "You are AI " .. index .. ". Other bots choose independently. Select your character and enter the world." },
     }, finish)
 end
@@ -237,6 +270,7 @@ function AIPlayerManager:Think(inst)
     local observation = Survival.Observe(inst)
     local x, y, z = inst.Transform:GetWorldPosition()
     observation.position, observation.character = { x = x, y = y, z = z }, inst.prefab
+    observation.name = inst.name
     observation.phase = TheWorld.state and TheWorld.state.phase or "unknown"
     local finished, timeout = false, nil
     local function finish(content, err)

@@ -45,10 +45,11 @@ class BotRosterTest(unittest.TestCase):
             end
             function add_prefab(name, fn) assert(prefabs[name]==nil); prefabs[name]=fn end
             function add_class(name, fn) assert(classes[name]==nil); classes[name]=fn end
+            function add_player(fn) assert(player_post_init==nil); player_post_init=fn end
         ''')
         lua.globals().TheWorld.ismastersim = master
         lua.globals().Roster = lua.execute((ROOT / "scripts/ai_players_roster.lua").read_text(encoding="utf-8"))
-        lua.execute('Roster.Register(add_prefab,add_class)')
+        lua.execute('Roster.Register(add_prefab,add_class,add_player)')
         return lua
 
     def attach(self, lua, prefab="forest_network"):
@@ -58,7 +59,7 @@ class BotRosterTest(unittest.TestCase):
     def test_registration_both_world_networks_and_native_screen_once(self):
         lua = self.runtime()
         lua.execute('''
-            Roster.Register(add_prefab,add_class)
+            Roster.Register(add_prefab,add_class,add_player)
             assert(prefabs.forest_network and prefabs.cave_network)
             assert(classes["screens/playerstatusscreen"])
             assert(classes["screens/redux/playerstatusscreen"]==nil)
@@ -70,6 +71,35 @@ class BotRosterTest(unittest.TestCase):
             assert(var.dirty=="ai_players_roster_dirty")
             prefabs.forest_network(network)
             assert(var==network._ai_players_roster)
+        ''')
+
+    def test_player_names_replicate_without_replacing_human_names(self):
+        server = self.runtime()
+        server.execute('''
+            player={GUID=99,name="original",components={},listeners={}}
+            function player:ListenForEvent(event,fn) self.listeners[event]=fn end
+            function player:DoTaskInTime(delay,fn) tasks[#tasks+1]=fn end
+            player_post_init(player)
+            local var=player._ai_players_name
+            player_post_init(player)
+            assert(player._ai_players_name==var)
+            assert(var.guid==99 and var.name=="ai_players.display_name")
+            flush(); assert(player.name=="original" and writes==0)
+            assert(Roster.SetName(player,"星河",1))
+            assert(var:value()=="星河" and player.name=="星河" and writes==1)
+        ''')
+        client = self.runtime(master=False)
+        client.execute('''
+            player={GUID=99,name="human",components={},listeners={}}
+            function player:ListenForEvent(event,fn) self.listeners[event]=fn end
+            function player:DoTaskInTime(delay,fn) tasks[#tasks+1]=fn end
+            player_post_init(player); flush()
+            assert(player.name=="human" and writes==0)
+            assert(not Roster.SetName(player,"forged",1))
+            assert(player.name=="human" and writes==0)
+            player._ai_players_name.data="星河"
+            player.listeners.ai_players_name_dirty()
+            assert(player.name=="星河" and writes==0)
         ''')
 
     def test_server_pending_publish_and_whitelisted_json_only(self):

@@ -85,6 +85,128 @@ class BridgeTest(unittest.TestCase):
                 self.assertEqual(forwarded, {key: value for key, value in self.payload().items()
                                            if key not in ("base_url", "api_key")})
 
+    def test_responses_forwarding_and_endpoint_normalization(self):
+        self.upstream.reply_body = json.dumps({
+            "status": "completed", "output": [{"type": "message", "content": [
+                {"type": "output_text", "text": "fixture result"}]}],
+        }).encode("utf-8")
+        for suffix, expected in (("", "/v1/responses"), ("/", "/v1/responses"),
+                                 ("/v1/", "/v1/responses"),
+                                 ("/v1/responses", "/v1/responses"),
+                                 ("/responses", "/responses"),
+                                 ("/custom/v2", "/custom/v2/responses")):
+            with self.subTest(suffix=suffix):
+                payload = self.payload()
+                payload["api_format"] = "responses"
+                payload["base_url"] += suffix
+                payload["unrecognized"] = "not forwarded"
+                status, body = self.request(payload)
+                self.assertEqual(status, 200)
+                self.assertEqual(json.loads(body), {"choices": [{"message": {
+                    "role": "assistant", "content": "fixture result"}}]})
+                path, headers, forwarded = self.upstream.received[-1]
+                self.assertEqual(path, expected)
+                self.assertEqual(headers["Authorization"], "Bearer fixture-key")
+                self.assertEqual(headers["Content-Type"], "application/json")
+                self.assertEqual(forwarded, {
+                    "model": "fixture-model", "input": payload["messages"],
+                    "max_output_tokens": 160, "text": {"format": {"type": "json_object"}},
+                    "store": False, "stream": False,
+                })
+
+    def test_api_format_and_endpoint_mismatches_are_rejected(self):
+        for api_format in (None, "", "private-format", [], {}):
+            with self.subTest(api_format=api_format):
+                payload = self.payload()
+                payload["api_format"] = api_format
+                status, body = self.request(payload)
+                self.assertEqual(status, 400)
+                self.assertEqual(json.loads(body), {"error": {"message": "invalid api_format"}})
+        for api_format, suffix in (("responses", "/v1/chat/completions"),
+                                   ("chat_completions", "/v1/responses"),
+                                   ("responses", "/v1/chat/completions/extra"),
+                                   ("chat_completions", "/v1/responses/extra")):
+            with self.subTest(api_format=api_format, suffix=suffix):
+                payload = self.payload()
+                payload.update(api_format=api_format, base_url=self.base_url + suffix)
+                status, body = self.request(payload)
+                self.assertEqual(status, 400)
+                self.assertEqual(json.loads(body), {"error": {"message": "invalid base_url"}})
+        self.assertEqual(self.upstream.received, [])
+
+    def test_responses_failures_are_sanitized(self):
+        text = {"type": "message", "content": [
+            {"type": "output_text", "text": "must not succeed"}]}
+        cases = (
+            ({"status": "failed", "output": [text], "error": None}, "upstream response failed"),
+            ({"status": "incomplete", "output": [text],
+              "incomplete_details": {"reason": "fixture-key private detail"}},
+             "upstream response incomplete"),
+            ({"status": "in_progress", "output": [text]}, "upstream response incomplete"),
+            ({"status": "completed", "output": [{"type": "message", "content": [
+                {"type": "refusal", "refusal": "fixture-key private detail"},
+                {"type": "output_text", "text": "must not succeed"}]}]},
+             "upstream response refused"),
+            ({"status": "completed", "output": []}, "upstream response contained no output text"),
+            ({"status": "completed", "output": [{"type": "reasoning", "content": [
+                {"type": "output_text", "text": "fixture-key private detail"}]}]},
+             "upstream response contained no output text"),
+            ({"status": "completed", "output": [{"type": "message", "content": [
+                {"type": "output_text", "text": ""}]}]}, "upstream response contained no output text"),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            for reply, expected in cases:
+                with self.subTest(reply=reply):
+                    self.upstream.reply_body = json.dumps(reply).encode("utf-8")
+                    payload = self.payload()
+                    payload["api_format"] = "responses"
+                    status, body = self.request(payload)
+                    self.assertEqual(status, 502)
+                    self.assertEqual(json.loads(body), {"error": {"message": expected}})
+        self.assertEqual(output.getvalue(), "")
+
+    def test_malformed_responses_are_sanitized(self):
+        for output in (None, 7, {}, [{"type": "message", "content": None}],
+                       [{"type": "message", "content": 7}],
+                       [{"type": "message", "content": {"text": "fixture-key"}}]):
+            with self.subTest(output=output):
+                self.upstream.reply_body = json.dumps({
+                    "status": "completed", "output": output}).encode("utf-8")
+                payload = self.payload()
+                payload["api_format"] = "responses"
+                status, body = self.request(payload)
+                self.assertEqual(status, 502)
+                self.assertEqual(json.loads(body), {
+                    "error": {"message": "upstream returned invalid JSON"}})
+
+    def test_responses_selects_only_message_text_and_normalizes_unicode_names(self):
+        selected = {"name": "\u5c0f\u660e", "character": "wilson"}
+        escaped = json.dumps(selected, ensure_ascii=True)
+        split = len(escaped) // 2
+        self.upstream.reply_body = json.dumps({
+            "status": "completed", "output_text": "wrong top-level text",
+            "output": [
+                {"type": "reasoning", "content": [
+                    {"type": "output_text", "text": "wrong reasoning text"}]},
+                {"type": "function_call", "text": "wrong tool text"},
+                {"type": "message", "content": [
+                    {"type": "summary_text", "text": "wrong content type"},
+                    {"type": "output_text", "text": escaped[:split]}]},
+                {"type": "message", "content": [
+                    {"type": "output_text", "text": escaped[split:]}]},
+            ],
+        }).encode("utf-8")
+        payload = self.payload()
+        payload["api_format"] = "responses"
+        status, body = self.request(payload)
+        self.assertEqual(status, 200)
+        content = json.loads(body)["choices"][0]["message"]["content"]
+        self.assertEqual(json.loads(content), selected)
+        self.assertIn(selected["name"].encode("utf-8"), body)
+        self.assertNotIn(b"\\u", body)
+        self.assertNotIn(b"wrong", body)
+
     def test_upstream_error_does_not_expose_body_or_key_or_logs(self):
         self.upstream.reply_status = 401
         self.upstream.reply_body = b'{"secret":"fixture-key upstream private detail"}'

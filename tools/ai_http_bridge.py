@@ -12,8 +12,8 @@ MAX_INPUT_BYTES = 1024 * 1024
 UPSTREAM_TIMEOUT = 45
 
 
-def completion_url(base_url):
-    """Accept a server root, API prefix, or complete chat completion endpoint."""
+def completion_url(base_url, api_format="chat_completions"):
+    """Accept a server root, API prefix, or complete completion endpoint."""
     if not isinstance(base_url, str):
         raise ValueError("invalid base URL")
     parsed = urlsplit(base_url.strip())
@@ -24,10 +24,14 @@ def completion_url(base_url):
     # Accessing port validates malformed/non-numeric ports before urllib uses it.
     parsed.port
     path = parsed.path.rstrip("/")
+    endpoint = "/responses" if api_format == "responses" else "/chat/completions"
+    for known_endpoint in ("/responses", "/chat/completions"):
+        if known_endpoint in path and (known_endpoint != endpoint or not path.endswith(endpoint)):
+            raise ValueError("endpoint does not match API format")
     if not path:
-        path = "/v1/chat/completions"
-    elif not path.endswith("/chat/completions"):
-        path += "/chat/completions"
+        path = "/v1" + endpoint
+    elif not path.endswith(endpoint):
+        path += endpoint
     return urlunsplit((parsed.scheme, parsed.netloc, path, "", ""))
 
 
@@ -89,8 +93,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
             data = json.loads(raw)
             if not isinstance(data, dict):
                 raise ValueError("invalid request")
+            api_format = data.get("api_format", "chat_completions")
+            if api_format not in ("chat_completions", "responses"):
+                raise InvalidField("invalid api_format")
             try:
-                url = completion_url(data.get("base_url"))
+                url = completion_url(data.get("base_url"), api_format)
             except (ValueError, TypeError, UnicodeError):
                 raise InvalidField("invalid base_url") from None
             api_key = data.get("api_key")
@@ -106,6 +113,14 @@ class BridgeHandler(BaseHTTPRequestHandler):
             payload = {key: value for key, value in data.items()
                        if key in ("model", "messages", "temperature", "max_tokens", "response_format")}
             payload["model"] = payload["model"].strip()
+            if api_format == "responses":
+                payload["input"] = payload.pop("messages")
+                payload.pop("temperature", None)
+                if "max_tokens" in payload:
+                    payload["max_output_tokens"] = payload.pop("max_tokens")
+                if "response_format" in payload:
+                    payload["text"] = {"format": payload.pop("response_format")}
+                payload.update(store=False, stream=False)
             encoded = json.dumps(payload, allow_nan=False).encode("utf-8")
         except InvalidField as error:
             self._error(400, str(error))
@@ -146,6 +161,35 @@ class BridgeHandler(BaseHTTPRequestHandler):
         # DST's decoder does not implement JSON Unicode escapes. Normalize both
         # the envelope and model-generated JSON content using real UTF-8 text.
         try:
+            if api_format == "responses":
+                if decoded.get("status") == "failed":
+                    self._error(502, "upstream response failed")
+                    return
+                if decoded.get("status") != "completed":
+                    self._error(502, "upstream response incomplete")
+                    return
+                chunks = []
+                output = decoded.get("output", [])
+                if not isinstance(output, list):
+                    raise ValueError("invalid output")
+                for item in output:
+                    if not isinstance(item, dict) or item.get("type") != "message":
+                        continue
+                    content = item.get("content", [])
+                    if not isinstance(content, list):
+                        raise ValueError("invalid message content")
+                    for part in content:
+                        if isinstance(part, dict) and part.get("type") == "refusal":
+                            self._error(502, "upstream response refused")
+                            return
+                        if (isinstance(part, dict) and part.get("type") == "output_text"
+                                and isinstance(part.get("text"), str)):
+                            chunks.append(part["text"])
+                if not "".join(chunks).strip():
+                    self._error(502, "upstream response contained no output text")
+                    return
+                decoded = {"choices": [{"message": {
+                    "role": "assistant", "content": "".join(chunks)}}]}
             choices = decoded.get("choices")
             for choice in choices if isinstance(choices, list) else ():
                 message = choice.get("message") if isinstance(choice, dict) else None

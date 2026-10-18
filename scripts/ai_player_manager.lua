@@ -36,7 +36,8 @@ end
 
 local function new_provider(self, index, api_key)
     return Provider.new(provider_option(self, index, "api_base_url", "https://api.openai.com/v1"),
-        provider_option(self, index, "model", "gpt-4o-mini"), api_key)
+        provider_option(self, index, "model", "gpt-4o-mini"), api_key,
+        safe_config(self, "ai_" .. index .. "_api_format", "chat_completions"))
 end
 
 local function is_human(player)

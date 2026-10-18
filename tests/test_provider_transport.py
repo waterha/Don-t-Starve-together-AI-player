@@ -42,6 +42,16 @@ class ProviderTransportTest(unittest.TestCase):
             assert(encoded.model=="fixture-model" and encoded.messages[1].content=="follow")
         ''')
 
+    def test_responses_format_is_carried_to_bridge(self):
+        lua = self.runtime()
+        lua.execute('''
+            Provider.new("https://relay.invalid/v1", "gpt-6.1-sol", "fixture-key", "responses"):Complete({},done)
+            assert(encoded.api_format=="responses", "Responses protocol was lost before bridge")
+            assert(encoded.max_tokens==2048)
+            Provider.new(nil,nil,"fixture-key"):Complete({},done)
+            assert(encoded.api_format=="chat_completions", "legacy default changed")
+        ''')
+
     def test_bridge_failure_is_reported_once(self):
         lua = self.runtime()
         lua.execute('''

@@ -9,8 +9,8 @@
 ## 游戏内配置
 
 1. 安装主模组。若需要在尚未启用服务器模组时，通过“已安装模组”菜单编辑配置，请将 `client_config_helper` 的内容复制到独立的同级目录 `mods/ai_players_config`，启用客户端模组 **AI Players Config**，然后重启一次游戏。配置助手必须是独立模组，不能只是主模组里的子目录。本地开发安装也可在游戏的 `mods/modsettings.lua` 中加入 `ForceEnableMod("ai_players_config")`；删除这一行即可取消自动加载。
-2. 打开 **AI Players** 配置，将 **AI player count** 设为 0–5。界面会显示相同数量的配置组，每组包含 **AI N API URL**、**AI N API key** 和 **AI N Model**；数量为 0 时不显示服务商字段。
-3. 分别填写每个 AI 的地址、Key 和模型。例如，AI 1 可以使用中转服务的地址、Key 和模型，AI 2 使用 `https://api.openai.com/v1`、自己的 OpenAI Key 和 `gpt-4o-mini`。接口须兼容 OpenAI Chat Completions。只有 Key 会遮挡显示，地址和模型保持可见。减少 AI 数量只会隐藏多余配置组，不会清除已填内容。
+2. 打开 **AI Players** 配置，将 **AI player count** 设为 0–5。界面会显示相同数量的配置组，每组包含 **AI N API URL**、**AI N API key**、**AI N Model** 和 **AI N API format**；数量为 0 时不显示服务商字段。
+3. 分别填写每个 AI 的地址、Key 和模型。例如，AI 1 可以使用中转服务的地址、Key 和模型，AI 2 使用 `https://api.openai.com/v1`、自己的 OpenAI Key 和 `gpt-4o-mini`。接口须兼容所选的 OpenAI Chat Completions 或 Responses 协议。只有 Key 会遮挡显示，地址和模型保持可见。减少 AI 数量只会隐藏多余配置组，不会清除已填内容。
 4. 地址或模型留空时，升级存档优先使用旧版共享配置；全新配置默认使用 `https://api.openai.com/v1` 和 `gpt-4o-mini`。每个 AI 显式填写的值始终优先，且不会成为其他 AI 的默认值。旧版共享地址、模型字段已隐藏。
 5. 点击 **Apply**，通过游戏原生的主机配置机制保存。重新打开后会保留字段及组数；**Back** 放弃未保存的修改；**Reset** 恢复默认值，包括 AI 数量为 0、隐藏所有服务商字段。
 6. 在运行世界服务器的电脑上启动 API 桥接程序。Windows 可双击 `tools/start_ai_bridge.cmd` 并保持窗口打开；需要 Python 3，无需额外依赖。也可运行 `python tools/ai_http_bridge.py`，Linux 使用 `python3`。桥接仅监听 `http://127.0.0.1:17893`，访问 `http://127.0.0.1:17893/health` 应返回 `{"ok":true}`。远程专用服务器必须在服务器本机启动桥接。
@@ -62,6 +62,14 @@
 
 **用量与隐私：**聊天可能额外调用所选 AI 的模型，普通定时请求不变；聊天触发请求每 AI 最多约 7.5 次/分钟，与定时请求共享在途限制，实际可能更少。待答聊天的输出预算上限从 160 提高到 320 token，以容纳短中文回答。公开聊天内容、发言者游戏标识和有限历史会经本机桥接发送到该 AI 配置的服务商，AI 回答对所有同分片玩家可见；不要在公开聊天中发送隐私或 Key。聊天、建议与试验状态只在当前世界会话保留，不跨存档学习。已执行原生 Lua 聊天函数的模拟回归，但尚未用真实主机和远端客户端验证 C++ 消息回调与显示链路。
 
+## Responses 接口（0.2.8）
+
+每组配置新增 **AI N API format**：`chat_completions`（默认，兼容旧配置）或 `responses`。如果服务商使用 OpenAI Responses，必须将对应 AI 设为 **Responses**，再填写服务商规定的 API 地址、Key 与模型，例如你的 `gpt-6.1-sol`；不会自动从模型名猜测协议，也不会失败后再试另一种协议。
+
+Responses 地址支持服务商根地址、`/v1` 或完整 `/v1/responses`：根地址补齐 `/v1/responses`，其他前缀补齐 `/responses`。选择 Responses 时不要填写 `/chat/completions`，反之亦然。桥接发送 `input`、`max_output_tokens`、`text.format`，关闭流式与存储，省略 `temperature`，从 `output` 消息中的 `output_text` 提取 JSON；拒绝、未完成或无文本会作为失败报告，不会当作成功选角。
+
+Responses 每次输出预算上限为 **2048 token**，包含模型推理 token，以降低原来 160/320 预算截断 JSON 的风险；实际消耗由服务商返回决定，仍可能用尽预算并失败。Chat Completions 的预算与请求频率不变。Responses 不会自动解决 `HTTP 401`：鉴权、额度和服务商的协议权限仍需有效。升级后重启游戏和桥接，在配置中选择 Responses 并 **Apply** 后继续世界。本地回归覆盖原生 JSON 编码、实际 HTTP 桥接、中文名字和非威尔逊选角，尚未用你的付费接口或真实游戏窗口验证。
+
 ## API Key 存储与安全
 
 Key 在界面中遮挡显示，但以普通游戏配置字符串保存，本模组不会加密。不要把真实 Key 放进创意工坊上传内容、Git 提交、截图、共享存档或共享配置文件。
@@ -73,8 +81,8 @@ Key 在界面中遮挡显示，但以普通游戏配置字符串保存，本模�
 1. 将主模组目录复制到服务器的 `mods` 目录。
 2. 在服务器的 `modoverrides.lua` 中启用模组。
 3. 将 `ai_count` 设为 `0`–`5`。
-4. 为每个 AI 填写 `ai_N_api_base_url`、`ai_N_api_key` 和 `ai_N_model`。多个 AI 可以重复使用同一个 Key。
-5. 每个地址都须兼容 OpenAI Chat Completions；不同 AI 可以使用不同的服务商和模型名称。
+4. 为每个 AI 填写 `ai_N_api_base_url`、`ai_N_api_key`、`ai_N_model` 与 `ai_N_api_format`（`chat_completions` 或 `responses`，省略时默认前者）。多个 AI 可以重复使用同一个 Key。
+5. 每个地址都须兼容所选协议；不同 AI 可以使用不同的服务商和模型名称。
 6. 进入世界前，在服务器本机启动 `python tools/ai_http_bridge.py`。
 
 `modoverrides.lua` 示例：
@@ -88,6 +96,7 @@ return {
             ai_1_api_base_url = "https://relay.example/v1",
             ai_1_api_key = "REPLACE_WITH_RELAY_SECRET",
             ai_1_model = "REPLACE_WITH_RELAY_MODEL_NAME",
+            ai_1_api_format = "responses",
             ai_2_api_base_url = "https://api.openai.com/v1",
             ai_2_api_key = "REPLACE_WITH_OPENAI_SECRET",
             ai_2_model = "gpt-4o-mini",

@@ -184,6 +184,12 @@ for index = 1, 5 do
             default="", saved="", options={{description="", data=""}},
         })
     end
+    table.insert(CONFIG, {
+        name="ai_" .. index .. "_api_format", label="AI " .. index .. " API format",
+        default="chat_completions", saved="chat_completions",
+        options={{description="Chat Completions", data="chat_completions"},
+                 {description="Responses", data="responses"}},
+    })
 end
 table.insert(CONFIG, {
     name="request_interval", label="Interval", default=30, saved=30,
@@ -271,6 +277,13 @@ class ConfigUIScreenTest(unittest.TestCase):
             setfenv(assert(loadstring(code)), env)()
             return env
         end''')((ROOT / "modinfo.lua").read_text(encoding="utf-8"))
+        self.assertEqual(metadata.version, "0.2.8")
+        options = {option.name: option for option in metadata.configuration_options.values()}
+        for index in range(1, 6):
+            option = options[f"ai_{index}_api_format"]
+            self.assertEqual(option.default, "chat_completions")
+            self.assertEqual([choice.data for choice in option.options.values()],
+                             ["chat_completions", "responses"])
         self.lua.globals().MOD_METADATA = metadata
         self.lua.execute('''
             GLOBAL = _G
@@ -307,7 +320,7 @@ class ConfigUIScreenTest(unittest.TestCase):
         count_row.opt.spinner.OnChanged(count_row.opt.spinner, 3)
         displayed = screen.options_scroll_list["items"]
         expected = [f"ai_{i}_{field}" for i in range(1, 4)
-                    for field in ("api_base_url", "api_key", "model")]
+                    for field in ("api_base_url", "api_key", "model", "api_format")]
         self.assertEqual([displayed[i].option.name for i in range(1, len(displayed) + 1)],
                          ["ai_count", *expected, "request_interval"])
         self.assertEqual(len([row for row in rows if row.ai_option_data is not None]), 9)
@@ -354,13 +367,21 @@ class ConfigUIScreenTest(unittest.TestCase):
                              if row.opt.data is not None and row.opt.data.option.name == "ai_count")
             count_row.opt.spinner.OnChanged(count_row.opt.spinner, count)
             expected_names = [f"ai_{i}_{field}" for i in range(1, count + 1)
-                              for field in ("api_base_url", "api_key", "model")]
+                              for field in ("api_base_url", "api_key", "model", "api_format")]
             self.assertEqual(len(visible()), count * 3)
             displayed = screen.options_scroll_list["items"]
             self.assertEqual([displayed[i].option.name for i in range(1, len(displayed) + 1)],
                              ["ai_count", *expected_names, "request_interval"])
             self.assertEqual({row.ai_option_data.option.name for row in visible()},
-                             set(expected_names))
+                             {name for name in expected_names if not name.endswith("_api_format")})
+            formats = [row for _, row in screen.options_scroll_list.rows.items()
+                       if row.opt.data is not None and row.opt.data.option.name.endswith("_api_format")]
+            self.assertEqual(len(formats), count)
+            for row in formats:
+                self.assertIsNone(row.ai_option_data)
+                self.assertTrue(row.opt.spinner.shown)
+                self.assertTrue(row.ai_text_entry is None or not row.ai_text_entry.shown)
+                self.assertEqual(row.opt.data.selected_value, "chat_completions")
             for row in visible():
                 name = row.ai_option_data.option.name
                 entry = row.ai_text_entry.textbox
@@ -407,7 +428,7 @@ class ConfigUIScreenTest(unittest.TestCase):
 
         def row(name):
             for _, candidate in screen.options_scroll_list.rows.items():
-                if candidate.ai_option_data and candidate.ai_option_data.option.name == name:
+                if candidate.opt.data and candidate.opt.data.option.name == name:
                     return candidate
             raise AssertionError(name)
 
@@ -433,6 +454,19 @@ class ConfigUIScreenTest(unittest.TestCase):
             entry.OnTextInputted(entry)
             self.assertEqual(entry.GetString(entry), value)
             self.assertTrue(row(name).ai_option_data.selected_value == value)
+        formats = {f"ai_{index}_api_format": "responses" if index % 2 else "chat_completions"
+                   for index in range(1, 6)}
+        for name, value in formats.items():
+            format_row = row(name)
+            self.assertIsNone(format_row.ai_option_data)
+            self.assertTrue(format_row.opt.spinner.shown)
+            self.assertTrue(format_row.ai_text_entry is None or not format_row.ai_text_entry.shown)
+            self.assertEqual([choice.data for choice in format_row.opt.spinner.options.values()],
+                             ["chat_completions", "responses"])
+            format_row.opt.spinner.OnChanged(format_row.opt.spinner, value)
+            self.assertEqual(format_row.opt.data.selected_value, value)
+        for name, value in formats.items():
+            self.assertEqual(row(name).opt.data.selected_value, value)
         self.assertTrue(screen.IsDirty(screen))
         self.assertTrue(row("ai_1_api_key").ai_text_entry.textbox.password)
         self.assertFalse(row("ai_1_api_base_url").ai_text_entry.textbox.password)
@@ -460,9 +494,25 @@ class ConfigUIScreenTest(unittest.TestCase):
         grid.update_fn(None, recycled, screen.optionwidgets[1], 1)
         self.assertFalse(recycled.ai_text_entry.shown)
         self.assertTrue(recycled.opt.spinner.shown)
+        format_data = next(data for _, data in screen.optionwidgets.items()
+                           if data.option.name == "ai_1_api_format")
+        recycled.ai_text_entry.textbox.SetEditing(recycled.ai_text_entry.textbox, True)
+        grid.update_fn(None, recycled, format_data, 5)
+        self.assertFalse(recycled.ai_text_entry.shown)
+        self.assertFalse(recycled.ai_text_entry.textbox.editing)
+        self.assertIsNone(recycled.ai_option_data)
+        self.assertTrue(recycled.opt.spinner.shown)
+        recycled.opt.spinner.OnChanged(recycled.opt.spinner, "chat_completions")
+        self.assertEqual(format_data.selected_value, "chat_completions")
+        self.assertEqual(format_data.option.value, "chat_completions")
+        self.assertFalse(recycled.opt.spinner.modified)
+        self.assertEqual(row("ai_2_api_format").opt.data.selected_value, formats["ai_2_api_format"])
+        recycled.opt.spinner.OnChanged(recycled.opt.spinner, "responses")
+        self.assertTrue(recycled.opt.spinner.modified)
         grid.update_fn(None, recycled, screen.optionwidgets[3], 3)
         self.assertTrue(recycled.ai_text_entry.shown)
         self.assertTrue(recycled.ai_text_entry.textbox.password)
+        self.assertFalse(recycled.opt.spinner.shown)
         self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox), values["ai_1_api_key"])
 
         # Apply with bots 3-5 hidden, then reopen and reveal their retained values.
@@ -472,7 +522,7 @@ class ConfigUIScreenTest(unittest.TestCase):
         saved = {item.name: item.saved for _, item in self.lua.globals().SAVED.items()}
         self.assertEqual(saved["api_base_url"], "https://legacy.example/v1")
         self.assertEqual(saved["model"], "legacy-model")
-        for name, value in values.items():
+        for name, value in {**values, **formats}.items():
             self.assertEqual(saved[name], value)
         screen = self.require("screens/redux/modconfigurationscreen")("ai_players", False)
         hooks[0][1](screen, "ai_players")
@@ -482,6 +532,10 @@ class ConfigUIScreenTest(unittest.TestCase):
         for name, value in values.items():
             self.assertEqual(row(name).ai_text_entry.textbox.GetString(row(name).ai_text_entry.textbox), value)
 
+        for name, value in formats.items():
+            self.assertEqual(row(name).opt.data.selected_value, value)
+            self.assertEqual(row(name).opt.data.option.value, value)
+            self.assertTrue(row(name).opt.spinner.shown)
         # Native Reset uses its confirmation callback and RefreshView; it restores
         # defaults in both the data model and the visible entries.
         screen.ResetToDefaultValues(screen)
@@ -493,6 +547,8 @@ class ConfigUIScreenTest(unittest.TestCase):
         reset_values = {item.name: item.saved for _, item in screen.CollectSettings(screen).items()}
         for name in values:
             self.assertEqual(reset_values[name], "")
+        for name in formats:
+            self.assertEqual(reset_values[name], "chat_completions")
 
         # Apply persists native CollectSettings output, including empty and duplicate keys.
         screen.Apply(screen)
@@ -502,6 +558,15 @@ class ConfigUIScreenTest(unittest.TestCase):
         self.assertEqual(saved_by_name["ai_1_api_key"], "")
         self.assertEqual(saved_by_name["ai_2_api_key"], "")
         self.assertEqual(saved_by_name["model"], "gpt-4o-mini")
+        for name in formats:
+            self.assertEqual(saved_by_name[name], "chat_completions")
+        count_row.opt.spinner.OnChanged(count_row.opt.spinner, 5)
+        self.assertEqual(sum(r.ai_option_data is not None
+                             for _, r in screen.options_scroll_list.rows.items()), 15)
+        for name in formats:
+            self.assertEqual(row(name).opt.data.selected_value, "chat_completions")
+            self.assertTrue(row(name).opt.spinner.shown)
+            self.assertTrue(row(name).ai_text_entry is None or not row(name).ai_text_entry.shown)
 
         # A fresh screen proves Cancel does not invoke persistence after an edit.
         second = self.require("screens/redux/modconfigurationscreen")("ai_players", False)

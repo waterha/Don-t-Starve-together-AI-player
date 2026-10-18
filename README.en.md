@@ -13,8 +13,8 @@ These are mod-controlled bots. Their rows extend the in-game list; they are not 
 ## Configure in game
 
 1. Install the main mod as usual. For editable settings in the **Installed Mods** menu before the server mod is enabled, copy the contents of `client_config_helper` to a separate sibling folder, `mods/ai_players_config`, enable **AI Players Config** as a client mod, and restart once. The helper must be a separate mod, not a nested folder inside AI Players. Local development installs may instead add `ForceEnableMod("ai_players_config")` to the game's `mods/modsettings.lua`; remove that line to stop automatically loading the helper.
-2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many groups appear, each with **AI N API URL**, **AI N API key** and **AI N Model**; at zero, no provider fields appear.
-3. Fill each AI's URL, key and model separately. For example, AI 1 can use a relay's URL/key/model while AI 2 uses `https://api.openai.com/v1`, its OpenAI key and `gpt-4o-mini`. Both endpoints must support OpenAI-compatible chat completions. Only keys are masked; URL and model text remain visible. Reducing the count hides unused groups and preserves all three values for reuse.
+2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many groups appear, each with **AI N API URL**, **AI N API key**, **AI N Model** and **AI N API format**; at zero, no provider fields appear.
+3. Fill each AI's URL, key and model separately. For example, AI 1 can use a relay's URL/key/model while AI 2 uses `https://api.openai.com/v1`, its OpenAI key and `gpt-4o-mini`. Each endpoint must support its selected OpenAI-compatible Chat Completions or Responses protocol. Only keys are masked; URL and model text remain visible. Reducing the count hides unused groups and preserves all three values for reuse.
 4. Blank URL/model fields fall back to the old shared settings for upgraded saves, or `https://api.openai.com/v1` and `gpt-4o-mini` for a fresh setup. Explicit per-AI values always take precedence; one AI's values never become another AI's defaults. The former shared URL/model rows are hidden.
 5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible group count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible provider fields.
 
@@ -65,6 +65,14 @@ Public speech is routed to one living bot. Use `@AI1 what do you need?` or `@Cho
 
 **Cost and privacy:** Chat can add model calls beyond the unchanged periodic schedule, at most roughly 7.5 chat-triggered calls per bot per minute, usually fewer due to in-flight requests. Pending-chat output budgets increase from 160 to at most 320 tokens for short replies. Public speech, game sender identifiers and bounded history are sent through the loopback bridge to that bot's configured provider. AI replies are public to the shard. Never post credentials or private information. Conversation/trial memory is session-only, not persisted learning. Tests execute installed native Lua chat callbacks with mocked engine calls; real host/remote C++ callback delivery and display are still unverified.
 
+## Responses API (0.2.8)
+
+Each group now has **AI N API format**: `chat_completions` (default for backward compatibility) or `responses`. Select **Responses** when required by your provider, then supply its API URL, key and model (for example, `gpt-6.1-sol`). Protocols are not guessed from model names, and failed calls never automatically retry through another protocol.
+
+Responses accepts a root URL, `/v1` prefix or full `/v1/responses` endpoint. Roots gain `/v1/responses`; other prefixes gain `/responses`. A Chat Completions endpoint cannot be used with Responses or vice versa. The bridge sends `input`, `max_output_tokens` and `text.format`, disables streaming and storage, omits `temperature`, and extracts message `output_text` from `output`. Refused, incomplete or textless responses fail explicitly instead of becoming successful choices.
+
+Responses uses an output budget of **2048 tokens per call**, including reasoning tokens, to reduce JSON truncation with the previous 160/320 budgets. Actual usage is provider-dependent; the budget may still be exhausted. Chat Completions budgets and request cadence are unchanged. Protocol support does not fix `HTTP 401`: valid authorization, quota and protocol access are still required. Restart the game and bridge, select Responses and **Apply** before resuming the world. Local tests cover the native JSON codec, real HTTP bridge, Chinese names and a non-Wilson selection; no paid provider or real game window was tested.
+
 ## API key storage
 
 Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server sends each request and key to its loopback bridge, which forwards the key only as Authorization to your configured API URL. The bridge logs no request bodies or credentials. The mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
@@ -74,8 +82,8 @@ Keys are masked on screen but saved as normal DST configuration strings, without
 1. Copy this Mod directory into the server's `mods` directory.
 2. Enable the Mod in the server's `modoverrides.lua`.
 3. Set `ai_count` between `0` and `5`.
-4. Fill `ai_N_api_base_url`, `ai_N_api_key` and `ai_N_model` for each AI. A key can be repeated for multiple AI players.
-5. Each URL must provide OpenAI-compatible chat completions. Different AIs can use different providers and model names.
+4. Fill `ai_N_api_base_url`, `ai_N_api_key`, `ai_N_model` and `ai_N_api_format` (`chat_completions` or `responses`, defaulting to the former) for each AI. A key can be repeated for multiple AI players.
+5. Each URL must support the selected protocol. Different AIs can use different providers and model names.
 6. Start `python tools/ai_http_bridge.py` on this server before entering the world.
 
 Example `modoverrides.lua` entry:
@@ -89,6 +97,7 @@ return {
             ai_1_api_base_url = "https://relay.example/v1",
             ai_1_api_key = "REPLACE_WITH_RELAY_SECRET",
             ai_1_model = "REPLACE_WITH_RELAY_MODEL_NAME",
+            ai_1_api_format = "responses",
             ai_2_api_base_url = "https://api.openai.com/v1",
             ai_2_api_key = "REPLACE_WITH_OPENAI_SECRET",
             ai_2_model = "gpt-4o-mini",

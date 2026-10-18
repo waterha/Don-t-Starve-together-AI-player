@@ -1,7 +1,7 @@
 name = "AI Players"
 description = "Adds up to five AI bots with independent model providers, character selection and basic autonomous survival."
 author = "waterha"
-version = "0.2.7"
+version = "0.2.8"
 ai_players_config_ui = true
 forumthread = ""
 api_version = 10
@@ -40,6 +40,15 @@ configuration_options = {
         options = { { description = "Default / previous model", data = "" } }, default = "",
     },
     {
+        name = "ai_1_api_format", label = "AI 1 API format",
+        hover = "API protocol used by AI 1's provider.",
+        options = {
+            { description = "Chat Completions", data = "chat_completions" },
+            { description = "Responses", data = "responses" },
+        },
+        default = "chat_completions",
+    },
+    {
         name = "ai_2_api_base_url", label = "AI 2 API URL",
         hover = "AI 2's OpenAI-compatible URL. Blank uses your previous shared URL, or https://api.openai.com/v1.",
         options = { { description = "Default / previous URL", data = "" } }, default = "",
@@ -53,6 +62,15 @@ configuration_options = {
         name = "ai_2_model", label = "AI 2 Model",
         hover = "Model name accepted by AI 2's provider. Blank uses your previous shared model, or gpt-4o-mini.",
         options = { { description = "Default / previous model", data = "" } }, default = "",
+    },
+    {
+        name = "ai_2_api_format", label = "AI 2 API format",
+        hover = "API protocol used by AI 2's provider.",
+        options = {
+            { description = "Chat Completions", data = "chat_completions" },
+            { description = "Responses", data = "responses" },
+        },
+        default = "chat_completions",
     },
     {
         name = "ai_3_api_base_url", label = "AI 3 API URL",
@@ -70,6 +88,15 @@ configuration_options = {
         options = { { description = "Default / previous model", data = "" } }, default = "",
     },
     {
+        name = "ai_3_api_format", label = "AI 3 API format",
+        hover = "API protocol used by AI 3's provider.",
+        options = {
+            { description = "Chat Completions", data = "chat_completions" },
+            { description = "Responses", data = "responses" },
+        },
+        default = "chat_completions",
+    },
+    {
         name = "ai_4_api_base_url", label = "AI 4 API URL",
         hover = "AI 4's OpenAI-compatible URL. Blank uses your previous shared URL, or https://api.openai.com/v1.",
         options = { { description = "Default / previous URL", data = "" } }, default = "",
@@ -85,6 +112,15 @@ configuration_options = {
         options = { { description = "Default / previous model", data = "" } }, default = "",
     },
     {
+        name = "ai_4_api_format", label = "AI 4 API format",
+        hover = "API protocol used by AI 4's provider.",
+        options = {
+            { description = "Chat Completions", data = "chat_completions" },
+            { description = "Responses", data = "responses" },
+        },
+        default = "chat_completions",
+    },
+    {
         name = "ai_5_api_base_url", label = "AI 5 API URL",
         hover = "AI 5's OpenAI-compatible URL. Blank uses your previous shared URL, or https://api.openai.com/v1.",
         options = { { description = "Default / previous URL", data = "" } }, default = "",
@@ -98,6 +134,15 @@ configuration_options = {
         name = "ai_5_model", label = "AI 5 Model",
         hover = "Model name accepted by AI 5's provider. Blank uses your previous shared model, or gpt-4o-mini.",
         options = { { description = "Default / previous model", data = "" } }, default = "",
+    },
+    {
+        name = "ai_5_api_format", label = "AI 5 API format",
+        hover = "API protocol used by AI 5's provider.",
+        options = {
+            { description = "Chat Completions", data = "chat_completions" },
+            { description = "Responses", data = "responses" },
+        },
+        default = "chat_completions",
     },
     {
         name = "request_interval", label = "Request interval",

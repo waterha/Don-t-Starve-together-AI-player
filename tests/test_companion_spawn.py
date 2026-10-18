@@ -28,9 +28,9 @@ class BotLifecycleTest(unittest.TestCase):
                 for i,r in ipairs(records) do copy[i]={index=r.index,status=r.status,character=r.character,name=r.name} end
                 snapshots[#snapshots+1]=copy
             end} end
-            package.preload.ai_provider = function() return {new=function(base,model,key)
+            package.preload.ai_provider = function() return {new=function(base,model,key,api_format)
                 return {Complete=function(self,messages,callback)
-                    requests[#requests+1]={messages=messages,callback=callback,key=key,base=base,model=model}
+                    requests[#requests+1]={messages=messages,callback=callback,key=key,base=base,model=model,api_format=api_format}
                 end}
             end} end
             config={ai_count=1, ai_1_api_key="fixture-key", ai_2_api_key="fixture-key", ai_3_api_key="fixture-key", ai_4_api_key="fixture-key", ai_5_api_key="fixture-key"}
@@ -256,10 +256,12 @@ class BotLifecycleTest(unittest.TestCase):
         lua.execute('''
             config.ai_1_api_base_url="https://relay.example/v1"
             config.ai_1_model="relay-model"
+            config.ai_1_api_format="responses"
             config.ai_2_api_base_url="https://api.openai.com/v1"
             config.ai_2_model="gpt-4o-mini"
             advance(2)
             assert(#requests==2)
+            assert(requests[1].api_format=="responses" and requests[2].api_format=="chat_completions")
             assert(requests[1].base==config.ai_1_api_base_url and requests[1].model==config.ai_1_model)
             assert(requests[2].base==config.ai_2_api_base_url and requests[2].model==config.ai_2_model)
             requests[1].callback('{"character":"willow"}',nil)
@@ -269,6 +271,7 @@ class BotLifecycleTest(unittest.TestCase):
             for i=1,2 do
                 assert(requests[i+2].base==requests[i].base and requests[i+2].model==requests[i].model)
                 assert(requests[i+2].key==requests[i].key)
+                assert(requests[i+2].api_format==requests[i].api_format)
             end
         ''')
 

@@ -6,13 +6,15 @@ local hook_installed = false
 
 local function ai_option_index(name)
     local index, field = name:match("^ai_([1-5])_(.+)$")
-    if field == "api_base_url" or field == "api_key" or field == "model" then
+    if field == "api_base_url" or field == "api_key" or field == "model"
+        or field == "api_format" then
         return tonumber(index)
     end
 end
 
 local function is_text_option(name)
-    return ai_option_index(name) ~= nil
+    local field = name:match("^ai_[1-5]_(.+)$")
+    return field == "api_base_url" or field == "api_key" or field == "model"
 end
 
 local function configure_screen(screen)

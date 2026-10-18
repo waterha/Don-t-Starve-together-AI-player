@@ -93,16 +93,21 @@ class NativeProviderJSONTest(unittest.TestCase):
                     json.loads(encoded)
         self.assertEqual(json.loads(lua.globals().json.encode_compliant("Don't")), "Don't")
 
-    def selection(self, ensure_ascii, escaped_character=False):
+    def selection(self, ensure_ascii, escaped_character=False, api_format="chat_completions"):
         lua = self.runtime()
+        lua.globals().fixture_provider.api_format = api_format
         selected_name = "\u5c0f\u660e"
         content = json.dumps({"name": selected_name, "character": "wilson"},
                              ensure_ascii=ensure_ascii)
         if escaped_character:
             content = content.replace('"wilson"', '"\\u0077illow"')
-        self.upstream.reply_body = json.dumps(
-            {"choices": [{"message": {"content": content}}]},
-            ensure_ascii=ensure_ascii).encode("utf-8")
+        response = {"choices": [{"message": {"content": content}}]}
+        if api_format == "responses":
+            response = {"status": "completed", "output": [
+                {"type": "reasoning", "summary": []},
+                {"type": "message", "role": "assistant", "content": [
+                    {"type": "output_text", "text": content}]}]}
+        self.upstream.reply_body = json.dumps(response, ensure_ascii=ensure_ascii).encode("utf-8")
         source = (ROOT / "scripts/ai_player_manager.lua").read_text(encoding="utf-8")
         begin = source.index("function AIPlayerManager:BeginSelection(index)")
         end = source.index("function AIPlayerManager:EnsureCompanions()", begin)
@@ -129,11 +134,20 @@ class NativeProviderJSONTest(unittest.TestCase):
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(self.requests[0][0], 200, self.requests[0][2])
         forwarded = self.upstream.received[-1][2]
-        self.assertEqual(forwarded["messages"][0]["role"], "system")
-        self.assertIn("Allowed character prefabs", forwarded["messages"][0]["content"])
+        messages = forwarded["input"] if api_format == "responses" else forwarded["messages"]
+        self.assertEqual(messages[0]["role"], "system")
+        self.assertIn("Allowed character prefabs", messages[0]["content"])
+        if api_format == "responses":
+            self.assertEqual(self.upstream.received[-1][0], "/v1/responses")
+            self.assertEqual(forwarded["max_output_tokens"], 2048)
+            self.assertNotIn("messages", forwarded)
+            self.assertNotIn("response_format", forwarded)
         slot = lua.globals().fixture_manager.slots[1]
         self.assertEqual(slot.character, "willow" if escaped_character else "wilson")
         self.assertEqual(slot.name, selected_name)
+
+    def test_responses_selection_with_native_codec_and_escaped_character(self):
+        self.selection(ensure_ascii=True, escaped_character=True, api_format="responses")
 
     def test_actual_selection_payload_and_utf8_chinese_response(self):
         self.selection(ensure_ascii=False)

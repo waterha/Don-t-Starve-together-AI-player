@@ -4,11 +4,12 @@ local Provider = {}
 Provider.__index = Provider
 local BRIDGE_URL = "http://127.0.0.1:17893/complete"
 
-function Provider.new(base_url, model, api_key)
+function Provider.new(base_url, model, api_key, api_format)
     return setmetatable({
         base_url = (base_url or "https://api.openai.com/v1"):gsub("/+$", ""),
         model = model or "gpt-4o-mini",
         api_key = api_key or "",
+        api_format = api_format or "chat_completions",
     }, Provider)
 end
 
@@ -35,10 +36,11 @@ function Provider:Complete(messages, callback, max_tokens)
         local encoded = json.encode_compliant({
             base_url = self.base_url,
             api_key = self.api_key,
+            api_format = self.api_format,
             model = self.model,
             messages = messages,
             temperature = 0.2,
-            max_tokens = max_tokens == 320 and 320 or 160,
+            max_tokens = self.api_format == "responses" and 2048 or (max_tokens == 320 and 320 or 160),
             response_format = { type = "json_object" },
         })
         -- The native compliant encoder still leaves some ASCII controls raw.

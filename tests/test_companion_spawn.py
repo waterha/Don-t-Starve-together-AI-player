@@ -19,7 +19,13 @@ class BotLifecycleTest(unittest.TestCase):
             return value
         lua.globals().decode_json = lambda content: table(json.loads(content))
         lua.execute('''
-            clock, tasks, periodics, requests, snapshots, spawned = 0, {}, {}, {}, {}, {}
+            clock, tasks, periodics, requests, snapshots, spawned, spoken = 0, {}, {}, {}, {}, {}, {}
+            actions, targets = {}, {}
+            chat_notices={}
+            TheNet={SystemMessage=function(self,text) spoken[#spoken+1]=text; if chat_notices then chat_notices[#chat_notices+1]=text end end}
+            TheSim={FindEntities=function(self,x,y,z,radius,include,exclude) return targets end}
+            ACTIONS={HAUNT={name="HAUNT"}}
+            function BufferedAction(doer,target,action) return {doer=doer,target=target,action=action} end
             function GetTime() return clock end
             package.preload.json = function() return {decode=decode_json, encode=function() return "observation" end} end
             package.preload.ai_survival = function() return {Observe=function() return {} end, Tick=function() return false end, Apply=function() return false end} end
@@ -28,12 +34,16 @@ class BotLifecycleTest(unittest.TestCase):
                 for i,r in ipairs(records) do copy[i]={index=r.index,status=r.status,character=r.character,name=r.name} end
                 snapshots[#snapshots+1]=copy
             end} end
-            package.preload.ai_provider = function() return {new=function(base,model,key,api_format)
+            package.preload.ai_progression = function() return {Observe=function() return {} end,Tick=function() return false end} end
+             package.preload.ai_dialogue = function() return {Begin=function(inst) inst._ai_test_token=(inst._ai_test_token or 0)+1; return inst._ai_test_token end, Observe=function() return {} end, End=function() end, Due=function() return false end, Tick=function() end} end
+             package.preload.ai_chat = function() return {Clean=function(s,limit) return s end, Say=function(inst,text) return TheNet and TheNet.SystemMessage and TheNet:SystemMessage(text) or false end, Register=function() end} end
+             chat_module=require('ai_chat')
+             package.preload.ai_provider = function() return {new=function(base,model,key,api_format)
                 return {Complete=function(self,messages,callback)
                     requests[#requests+1]={messages=messages,callback=callback,key=key,base=base,model=model,api_format=api_format}
                 end}
             end} end
-            config={ai_count=1, ai_1_api_key="fixture-key", ai_2_api_key="fixture-key", ai_3_api_key="fixture-key", ai_4_api_key="fixture-key", ai_5_api_key="fixture-key"}
+            config={ai_count=1, request_interval=30, model="gpt-4o-mini", api_base_url="https://api.openai.com/v1", ai_1_api_key="fixture-key", ai_2_api_key="fixture-key", ai_3_api_key="fixture-key", ai_4_api_key="fixture-key", ai_5_api_key="fixture-key"}
             AllPlayers={}
             function schedule(delay,callback)
                 local task={at=clock+delay,cancelled=false,callback=callback}
@@ -67,8 +77,10 @@ class BotLifecycleTest(unittest.TestCase):
                 function e:DoTaskInTime(delay,fn) return schedule(delay,function() fn(self) end) end
                 function e:ListenForEvent(event,fn) self.listeners[event]=fn end
                 e.components.named={SetName=function(self,value) self.value=value end}
-                e.components.talker={Say=function() end}
-                e.components.locomotor={GoToEntity=function() end,GoToPoint=function() end,Stop=function() end}
+                e.components.talker={Say=function(_,text) spoken[#spoken+1]=text end}
+                e.components.locomotor={GoToEntity=function() end,GoToPoint=function() end,Stop=function() end,
+                    PushAction=function(_,action,run) actions[#actions+1]=action; action.target.haunt_count=(action.target.haunt_count or 0)+1 end}
+                e.sg={HasStateTag=function() return false end}
                 return e
             end
             function SpawnPrefab(prefab)
@@ -96,14 +108,14 @@ class BotLifecycleTest(unittest.TestCase):
     def test_auth_failure_explains_fallback_in_public_chat(self):
         lua = self.runtime(existing_human=True)
         lua.execute('''
-            notices={}
-            TheNet={SystemMessage=function(self,text) notices[#notices+1]=text end}
+            chat_notices={}
             advance(2)
             requests[1].callback(nil,'upstream returned HTTP 401')
             assert(spawned[1].prefab=='wilson')
-            assert(#notices==1 and notices[1]:find('401',1,true))
-            assert(notices[1]:find('Key',1,true) and not notices[1]:find('fixture-key',1,true))
-            assert(notices[1]:find('模型',1,true))
+            assert(#chat_notices==1 and chat_notices[1]:find('401',1,true))
+            assert(notices == nil or #notices==0)
+            assert(chat_notices[1]:find('Key',1,true) and not chat_notices[1]:find('fixture-key',1,true))
+            assert(chat_notices[1]:find('模型',1,true))
         ''')
 
     def test_selection_diagnostics_distinguish_failure_without_exposing_values(self):
@@ -244,12 +256,25 @@ class BotLifecycleTest(unittest.TestCase):
             assert(snapshots[#snapshots][1].status=="alive" and snapshots[#snapshots][1].character=="willow")
             joined(TheWorld,owner); advance(2)
             assert(#spawned==1, "repeated human or bot join events duplicated bots")
+            spoken={}
+            spawned[1].components.talker.Say=function(_,text) end
+            chat_module.Say=function(inst,text) spoken[#spoken+1]=text end
+            spawned[1].tags.playerghost=true
             spawned[1].listeners.death()
-            assert(snapshots[#snapshots][1].status=="dead")
+            assert(snapshots[#snapshots][1].status=="ghost")
+            assert(#spoken==1 and spoken[1]:find("复活",1,true), "death should ask teammates once; got "..#spoken.." / "..tostring(spoken[1]))
             local request_count=#requests
-            owner=human(120,240); joined(TheWorld,owner); advance(5)
-            assert(#spawned==1 and #requests==request_count, "dead bots must remain retired without respawning or requesting")
-            assert(manager.slots[1].retired)
+            local stone=entity(125,245); stone.prefab="resurrectionstone"; stone.components.hauntable={DoHaunt=function() end}
+            stone.CanUseTouchStone=nil; targets={stone}
+            periodics[.25]()
+            advance(59); periodics[.25]()
+            assert((stone.haunt_count or 0)==0, "ghost should wait one minute before seeking revival")
+            advance(1); periodics[.25]()
+            assert((stone.haunt_count or 0)==1, "ghost should haunt a nearby usable revival target after one minute")
+            assert(#requests==request_count and #spawned==1, "revival uses native ghost, not a replacement character")
+            assert(manager.slots[1].status=="ghost")
+            spawned[1].tags.playerghost=nil; spawned[1].listeners.ms_respawnedfromghost()
+            assert(manager.slots[1].status=="alive" and not manager.slots[1].retired, "native resurrection event should restore the same AI")
         ''')
 
     def test_existing_save_with_human_already_present_starts_selection(self):
@@ -285,6 +310,7 @@ class BotLifecycleTest(unittest.TestCase):
             requests[2].callback('{"character":"wilson"}',nil)
             advance(1)
             assert(#requests==4)
+            manager:Think(spawned[1]); manager:Think(spawned[2])
             for i=1,2 do
                 assert(requests[i+2].base==requests[i].base and requests[i+2].model==requests[i].model)
                 assert(requests[i+2].key==requests[i].key)
@@ -307,7 +333,7 @@ class BotLifecycleTest(unittest.TestCase):
         ''')
 
     def test_direct_spawn_uses_own_provider_and_builtin_defaults(self):
-        lua = self.runtime(existing_human=True)
+        lua = self.runtime(count=0, existing_human=True)
         lua.execute('''
             config.ai_2_api_base_url="https://direct.example/v1"
             config.ai_2_model="direct-model"
@@ -315,7 +341,9 @@ class BotLifecycleTest(unittest.TestCase):
             advance(2)
             assert(requests[1].base=="https://direct.example/v1" and requests[1].model=="direct-model")
             assert(requests[1].key=="direct-key")
-            assert(requests[2].base=="https://api.openai.com/v1" and requests[2].model=="gpt-4o-mini")
+            requests[1].callback('{}',nil)
+            manager:Think(spawned[1]); assert(#requests==2)
+            assert(requests[2].base=="https://direct.example/v1" and requests[2].model=="direct-model")
         ''')
 
     def test_selection_timeout_falls_back_once_and_ignores_late_reply(self):

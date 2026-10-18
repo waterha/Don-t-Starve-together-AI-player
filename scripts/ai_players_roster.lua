@@ -6,7 +6,7 @@ local pending = "[]"
 local MAX_BOTS = 5
 local MAX_PAYLOAD = 4096
 local DIRTY_EVENT = "ai_players_roster_dirty"
-local VALID_STATUS = { selecting = true, alive = true, dead = true }
+local VALID_STATUS = { selecting = true, alive = true, ghost = true, dead = true }
 
 local function clean_name(value, index, fallback)
     if type(value) ~= "string" then
@@ -79,7 +79,7 @@ function Roster.GetSlots()
     return ok and sanitize(slots) or {}
 end
 
--- Public records: {index=1..5, name=string, status="selecting"|"alive"|"dead",
+-- Public records: {index=1..5, name=string, status="selecting"|"alive"|"ghost"|"dead",
 -- character=prefab_name, GUID=optional_entity_guid}. No identity or config fields.
 function Roster.Publish(slots)
     if TheWorld == nil or not TheWorld.ismastersim then
@@ -175,7 +175,7 @@ local function configure_screen(screen)
                 local width = row.name:GetRegionSize()
                 row.name:SetPosition(row.name._align.x + width * .5, 0, 0)
                 row.name:SetColour(1, 1, 1, 1)
-                row.age:SetString(record.status == "selecting" and "Selecting" or record.status == "dead" and "Dead" or "Alive")
+                row.age:SetString(record.status == "selecting" and "Selecting" or record.status == "ghost" and "Ghost" or record.status == "dead" and "Dead" or "Alive")
                 row.age:Show()
                 row.characterBadge:Set(record.character, DEFAULT_PLAYER_COLOUR, false, 0)
                 row.characterBadge:Show()

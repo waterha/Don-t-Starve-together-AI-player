@@ -51,8 +51,12 @@ local function find_human()
     end
 end
 
+local function is_ghost(inst)
+    return inst and inst:IsValid() and inst:HasTag("playerghost")
+end
+
 local function alive(inst)
-    return inst and inst:IsValid() and not inst:HasTag("playerghost")
+    return inst and inst:IsValid() and not is_ghost(inst)
         and not (inst.components.health and inst.components.health:IsDead())
 end
 
@@ -133,6 +137,75 @@ function AIPlayerManager:PublishRoster()
     Roster.Publish(records)
 end
 
+function AIPlayerManager:OnGhost(inst)
+    if not is_ghost(inst) then return end
+    local slot = self.slots[inst._ai_index]
+    if not slot or slot.inst ~= inst or slot.status == "ghost" then return end
+    slot.status, slot.retired = "ghost", nil
+    inst._ai_revive_at = GetTime() + 60
+    inst._ai_revive_next_attempt = inst._ai_revive_at
+    inst._ai_revive_target = nil
+    inst._ai_revive_asked = true
+    self:PublishRoster()
+    speak(inst, "我变成灵魂了。队友有复活道具吗？我先等一分钟。")
+end
+
+function AIPlayerManager:FindReviveTarget(inst)
+    if not TheSim or not inst.Transform then return nil end
+    local x, y, z = inst.Transform:GetWorldPosition()
+    local entities = TheSim:FindEntities(x, y, z, 80, {"resurrector"}, {"INLIMBO", "FX"})
+    local nearest, nearest_dist
+    for _, target in ipairs(entities) do
+        if target:IsValid() and not target:HasTag("playerghost") and target.components
+            and target.components.hauntable and target.components.hauntable.DoHaunt
+            and (not inst.CanUseTouchStone or target.prefab ~= "resurrectionstone" or inst:CanUseTouchStone(target)) then
+            local tx, _, tz = target.Transform:GetWorldPosition()
+            local distance = (tx - x)^2 + (tz - z)^2
+            if not nearest_dist or distance < nearest_dist then nearest, nearest_dist = target, distance end
+        end
+    end
+    return nearest
+end
+
+function AIPlayerManager:OnResurrected(inst)
+    if not inst or not inst:IsValid() or inst:HasTag("playerghost") then return end
+    local slot = self.slots[inst._ai_index]
+    if not slot or slot.inst ~= inst then return end
+    slot.status, slot.retired = "alive", nil
+    inst._ai_revive_at, inst._ai_revive_next_attempt, inst._ai_revive_target = nil, nil, nil
+    inst._ai_busy, inst._ai_mode = false, "autonomous"
+    self:PublishRoster()
+    inst:DoTaskInTime(1, function() if alive(inst) then self:Think(inst) end end)
+end
+
+function AIPlayerManager:TryGhostRevive(inst)
+    if not is_ghost(inst) then return false end
+    local slot = self.slots[inst._ai_index]
+    if not slot or slot.inst ~= inst then return false end
+    if GetTime() < (inst._ai_revive_at or math.huge) then return true end
+    if not inst.sg or inst.sg:HasStateTag("busy") then return true end
+    if inst.components.locomotor and inst.components.locomotor.bufferedaction then return true end
+    local target = inst._ai_revive_target
+    if not target or not target:IsValid() then target = self:FindReviveTarget(inst) end
+    if target and inst.components.locomotor and BufferedAction and ACTIONS and ACTIONS.HAUNT then
+        inst._ai_revive_target = target
+        local action = BufferedAction(inst, target, ACTIONS.HAUNT)
+        inst.components.locomotor:PushAction(action, true)
+        inst._ai_revive_next_attempt = GetTime() + 20
+        inst:DoTaskInTime(20, function()
+            if is_ghost(inst) and inst._ai_revive_target == target then
+                inst._ai_revive_target = nil
+            end
+        end)
+        return true
+    end
+    if GetTime() >= (inst._ai_revive_next_attempt or 0) then
+        inst._ai_revive_target = nil
+        inst._ai_revive_next_attempt = GetTime() + 20
+    end
+    return true
+end
+
 function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     owner = is_human(owner) and owner or find_human()
     if not owner then return end
@@ -177,9 +250,11 @@ function AIPlayerManager:SpawnOne(index, api_key, owner, character)
     if slot then
         slot.inst, slot.character, slot.status = inst, character, "alive"
         inst:ListenForEvent("death", function()
-            slot.status, slot.retired = "dead", true
-            self:PublishRoster()
+            self:OnGhost(inst)
+            if not is_ghost(inst) then slot.status = "dead"; self:PublishRoster() end
         end)
+        inst:ListenForEvent("makeplayerghost", function() self:OnGhost(inst) end)
+        inst:ListenForEvent("ms_respawnedfromghost", function() self:OnResurrected(inst) end)
         inst:ListenForEvent("onremove", function()
             slot.status, slot.retired = "dead", true
             self:PublishRoster()
@@ -257,7 +332,7 @@ function AIPlayerManager:EnsureCompanions()
         if self.keys[index] then
             local slot = self.slots[index]
             if slot and slot.retired then
-                -- A dead bot remains retired for this world session; never respawn it.
+                -- Removed entities are not replaced during this world session.
             elseif not slot then
                 slot = { status = "selecting", provider = new_provider(self, index, self.keys[index]) }
                 self.slots[index] = slot
@@ -515,6 +590,7 @@ function AIPlayerManager:Think(inst)
 end
 
 function AIPlayerManager:UpdateLocal(inst)
+    if is_ghost(inst) then self:TryGhostRevive(inst); return end
     if not alive(inst) then return end
     if Dialogue.Due(inst, GetTime()) then self:Think(inst) end
     -- Autonomous progression reevaluates shortages instead of endlessly chopping one tree.

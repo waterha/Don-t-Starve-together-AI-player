@@ -38,8 +38,12 @@ local function widget(name)
     function self:SetVAlign(...) end
     function self:SetHAlign(...) end
     function self:EnableWordWrap(...) end
-    function self:SetString(value) self.string = value end
+    function self:SetString(value)
+        self._raw_string = value or ""
+        self.string = self.password and string.rep("*", #self._raw_string) or self._raw_string
+    end
     function self:GetString() return self.string or "" end
+    function self:GetLineEditString() return self._raw_string or self.string or "" end
     function self:GetRegionSize() return 100 end
     function self:SetTruncatedString(value) self.string = value end
     function self:Show() self.shown = true end
@@ -55,7 +59,19 @@ local function widget(name)
     function self:SetTextLengthLimit(...) end
     function self:SetAllowNewline(...) end
     function self:SetEditing(value) self.editing = value end
-    function self:SetPassword(value) self.password = value end
+    function self:SetPassword(value)
+        self.password = value
+        if self.password and self._raw_string ~= nil then
+            self.string = string.rep("*", #self._raw_string)
+        elseif not self.password and self._raw_string ~= nil then
+            self.string = self._raw_string
+        end
+    end
+    function self:SetString(value)
+        self._raw_string = value or ""
+        self.string = self.password and string.rep("*", #self._raw_string) or self._raw_string
+    end
+    function self:GetActualString() return self._raw_string or self.string or "" end
     function self:GetString() return self.string or "" end
     function self:SetOnGainFocus(callback) self.on_gain_focus = callback end
     return self
@@ -102,7 +118,15 @@ local function text_entry()
         OnTextInput = function(_, text) result.textbox.string = result.textbox.string .. text end,
     }}
     function result.textbox:ValidateChar(text) return true end
-    function result.textbox:OnTextInput(text) return native_text_input(self, text) end
+    function result.textbox:OnTextInput(text)
+        local result = native_text_input(self, text)
+        if self.password and result then
+            self._raw_string = self._raw_string or ""
+            self._raw_string = self._raw_string .. text
+            self.string = string.rep("*", #self._raw_string)
+        end
+        return result
+    end
     function result.textbox:OnTextInputted(...) end
     function result.textbox:OnTextEntered(...) end
     result:AddChild(result.textbox)
@@ -333,7 +357,8 @@ class ConfigUIScreenTest(unittest.TestCase):
             for char in "fixture-key":
                 result = entry.OnTextInput(entry, char)
                 self.assertTrue(result[0])
-            self.assertEqual(entry.GetString(entry), "fixture-key")
+            self.assertEqual(entry.GetString(entry), "***********")
+            self.assertEqual(entry.GetLineEditString(entry), "fixture-key")
             self.assertEqual(row.ai_option_data.option.value, "fixture-key")
         screen.Apply(screen)
         self.assertFalse(self.lua.globals().SAVED_CLIENT_CONFIG)
@@ -387,10 +412,13 @@ class ConfigUIScreenTest(unittest.TestCase):
                 entry = row.ai_text_entry.textbox
                 self.assertEqual(entry.password, name.endswith("_api_key"))
                 value = "fixture-" + name
-                if entry.GetString(entry):
-                    self.assertEqual(entry.GetString(entry), value)
+                if entry.GetLineEditString(entry):
+                    self.assertEqual(entry.GetLineEditString(entry), value)
                 entry.SetString(entry, value)
                 entry.OnTextInputted(entry)
+                if name.endswith("_api_key"):
+                    self.assertEqual(entry.GetString(entry), "*" * len(value))
+                    self.assertEqual(entry.GetLineEditString(entry), value)
             interval = next(row for _, row in screen.options_scroll_list.rows.items()
                             if row.opt.data is not None and row.opt.data.option.name == "request_interval")
             interval.opt.spinner.OnChanged(interval.opt.spinner, 60)
@@ -452,7 +480,8 @@ class ConfigUIScreenTest(unittest.TestCase):
             entry = row(name).ai_text_entry.textbox
             entry.SetString(entry, value)
             entry.OnTextInputted(entry)
-            self.assertEqual(entry.GetString(entry), value)
+            self.assertEqual(entry.GetLineEditString(entry), value)
+            self.assertEqual(entry.GetString(entry), "*" * len(value) if name.endswith("_api_key") else value)
             self.assertTrue(row(name).ai_option_data.selected_value == value)
         formats = {f"ai_{index}_api_format": "responses" if index % 2 else "chat_completions"
                    for index in range(1, 6)}
@@ -475,7 +504,9 @@ class ConfigUIScreenTest(unittest.TestCase):
         # RefreshView recycles the native rows but must retain every edited value.
         screen.options_scroll_list.RefreshView(screen.options_scroll_list)
         for name, value in values.items():
-            self.assertEqual(row(name).ai_text_entry.textbox.GetString(row(name).ai_text_entry.textbox), value)
+            textbox = row(name).ai_text_entry.textbox
+            self.assertEqual(textbox.GetLineEditString(textbox), value)
+            self.assertEqual(textbox.GetString(textbox), "*" * len(value) if name.endswith("_api_key") else value)
             self.assertEqual(row(name).ai_option_data.option.value, value)
 
         # Recycle a password row into plain URL/model fields and a spinner.
@@ -513,7 +544,8 @@ class ConfigUIScreenTest(unittest.TestCase):
         self.assertTrue(recycled.ai_text_entry.shown)
         self.assertTrue(recycled.ai_text_entry.textbox.password)
         self.assertFalse(recycled.opt.spinner.shown)
-        self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox), values["ai_1_api_key"])
+        self.assertEqual(recycled.ai_text_entry.textbox.GetLineEditString(recycled.ai_text_entry.textbox), values["ai_1_api_key"])
+        self.assertEqual(recycled.ai_text_entry.textbox.GetString(recycled.ai_text_entry.textbox), "*" * len(values["ai_1_api_key"]))
 
         # Apply with bots 3-5 hidden, then reopen and reveal their retained values.
         count_row.opt.spinner.OnChanged(count_row.opt.spinner, 2)
@@ -530,7 +562,9 @@ class ConfigUIScreenTest(unittest.TestCase):
                          if r.opt.data is not None and r.opt.data.option.name == "ai_count")
         count_row.opt.spinner.OnChanged(count_row.opt.spinner, 5)
         for name, value in values.items():
-            self.assertEqual(row(name).ai_text_entry.textbox.GetString(row(name).ai_text_entry.textbox), value)
+            textbox = row(name).ai_text_entry.textbox
+            self.assertEqual(textbox.GetLineEditString(textbox), value)
+            self.assertEqual(textbox.GetString(textbox), "*" * len(value) if name.endswith("_api_key") else value)
 
         for name, value in formats.items():
             self.assertEqual(row(name).opt.data.selected_value, value)

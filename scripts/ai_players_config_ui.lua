@@ -17,6 +17,13 @@ local function is_text_option(name)
     return field == "api_base_url" or field == "api_key" or field == "model"
 end
 
+local function entry_value(textbox)
+    if textbox.GetLineEditString then
+        return textbox:GetLineEditString()
+    end
+    return textbox:GetString()
+end
+
 local function configure_screen(screen)
     if screen.ai_players_configured then
         return
@@ -103,7 +110,7 @@ local function configure_screen(screen)
                 if not bound then
                     return
                 end
-                local value = entry.textbox:GetString()
+                local value = entry_value(entry.textbox)
                 if value ~= bound.selected_value then
                     bound.selected_value = value
                     bound.option.value = value

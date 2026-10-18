@@ -1,7 +1,7 @@
 name = "AI Players"
 description = "Adds up to five server-controlled AI companions backed by an OpenAI-compatible model API."
 author = "waterha"
-version = "0.1.0"
+version = "0.1.1"
 forumthread = ""
 api_version = 10
 dst_compatible = true
@@ -26,35 +26,35 @@ configuration_options = {
     {
         name = "ai_1_api_key",
         label = "AI 1 API key",
-        hover = "Server-side key. Do not publish this configuration or Workshop item.",
+        hover = "Click to type or paste a key after enabling this mod. Stored in host settings; do not share saved configuration.",
         options = { { description = "Not configured", data = "" } },
         default = "",
     },
     {
         name = "ai_2_api_key",
         label = "AI 2 API key",
-        hover = "Server-side key. Do not publish this configuration or Workshop item.",
+        hover = "Click to type or paste a key after enabling this mod. Stored in host settings; do not share saved configuration.",
         options = { { description = "Not configured", data = "" } },
         default = "",
     },
     {
         name = "ai_3_api_key",
         label = "AI 3 API key",
-        hover = "Server-side key. Do not publish this configuration or Workshop item.",
+        hover = "Click to type or paste a key after enabling this mod. Stored in host settings; do not share saved configuration.",
         options = { { description = "Not configured", data = "" } },
         default = "",
     },
     {
         name = "ai_4_api_key",
         label = "AI 4 API key",
-        hover = "Server-side key. Do not publish this configuration or Workshop item.",
+        hover = "Click to type or paste a key after enabling this mod. Stored in host settings; do not share saved configuration.",
         options = { { description = "Not configured", data = "" } },
         default = "",
     },
     {
         name = "ai_5_api_key",
         label = "AI 5 API key",
-        hover = "Server-side key. Do not publish this configuration or Workshop item.",
+        hover = "Click to type or paste a key after enabling this mod. Stored in host settings; do not share saved configuration.",
         options = { { description = "Not configured", data = "" } },
         default = "",
     },
@@ -75,7 +75,7 @@ configuration_options = {
     {
         name = "request_interval",
         label = "Request interval",
-        hover = "Seconds between model requests per AI.",
+        hover = "Seconds between model requests for each AI. Shorter intervals use more API requests. Busy AIs skip a tick.",
         options = {
             { description = "15 seconds", data = 15 },
             { description = "30 seconds", data = 30 },

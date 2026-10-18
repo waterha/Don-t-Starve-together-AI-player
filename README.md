@@ -2,11 +2,21 @@
 
 This repository contains a server-authoritative prototype Mod that can spawn up to five AI companions. Each companion can use a separate API key; keys may be repeated when several companions use the same model account.
 
-## Important security limitation
+## Configure in game
 
-Do not put real API keys in a public Workshop upload, Git commit, screenshot, or client-shared configuration. DST's native Mod configuration screen only supports predefined options, not arbitrary secret text input. The `ai_1_api_key` through `ai_5_api_key` options are therefore read from the server's `modoverrides.lua` file.
+1. Enable **AI Players** in the server mods list before opening its configuration screen. If updating an already running game, restart it once to reload the frontend hook.
+2. Set **AI player count** to 0-5.
+3. Click each **AI N API key** text box and type or paste the key. The characters are masked. A key can be repeated for multiple companions.
+4. Edit **API base URL** and **Model** to match your OpenAI-compatible provider.
+5. Click **Apply** to save using DST's normal host configuration. Reopening the screen preserves the values. **Back** discards pending edits; **Reset** restores the defaults.
 
-The Mod calls an OpenAI-compatible endpoint from the world server. Clients only install the package and receive the replicated companion entity; clients never receive the API key through this code.
+The mod extends DST's configuration screen only for its own text fields. Count and request interval remain normal dropdowns. Dedicated servers can still use the override example below.
+
+**Request interval** is the delay in seconds between scheduled model calls for each AI (15, 30, or 60; default 30). At 30 seconds, five configured AIs make at most about 10 calls per minute after startup. An AI with a request still in flight skips that tick. This controls decision frequency and API usage, not game frame rate or movement speed.
+
+## API key storage
+
+Keys are masked on screen but saved as normal DST configuration strings, without encryption by this mod. Do not put real keys in Workshop uploads, commits, screenshots, shared saves, or shared configuration files. The world server makes model requests; the mod adds no RPC to send keys to clients. Masking does not make DST's configuration storage a secret vault.
 
 ## Server setup
 
@@ -48,6 +58,17 @@ Replace the key in the example with the actual Workshop ID after publishing. For
 - Requests are scheduled at the configured interval, with a minimum of 15 seconds.
 
 This is an early implementation. DST's player prefab and HTTP callback behavior vary between game builds, so test it on a dedicated server and inspect `server_log.txt` before using it in an existing world.
+
+## Tests
+
+The configuration regressions use Lua 5.1 through `lupa`. Point `DST_SCRIPTS_ZIP` to your installed game's `data/databundles/scripts.zip` to exercise its native configuration screen; game source is not included in this repository. The UI test explicitly skips if that resource is unavailable.
+
+```powershell
+python -m pip install lupa
+$env:DST_SCRIPTS_ZIP = 'C:\path\to\DST\data\databundles\scripts.zip'
+python -m unittest discover -s tests -p 'test_*.py' -v
+powershell -NoProfile -ExecutionPolicy Bypass -File .\tests\test_static.ps1
+```
 
 ## Logs
 

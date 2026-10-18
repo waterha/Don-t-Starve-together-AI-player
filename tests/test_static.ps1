@@ -10,7 +10,7 @@ foreach ($i in 1..5) {
     $option = 'name = "ai_' + $i + '_api_key"'
     if ($modInfo -notmatch [regex]::Escape($option)) { throw "missing ai_${i}_api_key option" }
 }
-if ($manager -notmatch 'safe_config\("ai_"') { throw 'manager does not read per-AI keys' }
+if ($manager -notmatch 'safe_config\(self, "ai_"') { throw 'manager does not read per-AI keys' }
 if ($manager -notmatch 'math\.min\(MAX_PLAYERS') { throw 'AI count is not capped' }
 if ($manager -notmatch 'SpawnPrefab, "wilson"') { throw 'AI spawn path missing' }
 if ($provider -notmatch 'Authorization') { throw 'authorization header missing' }

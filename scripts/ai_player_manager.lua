@@ -17,8 +17,8 @@ local function clamp_count(value)
     return math.max(0, math.min(MAX_PLAYERS, math.floor(value)))
 end
 
-local function safe_config(name, default)
-    local value = GetModConfigData(name)
+local function safe_config(self, name, default)
+    local value = self.get_config(name)
     return value == nil and default or value
 end
 
@@ -50,8 +50,8 @@ local function find_target(inst, target_name)
     return nil
 end
 
-function AIPlayerManager.new()
-    return setmetatable({ players = {}, next_id = 0 }, AIPlayerManager)
+function AIPlayerManager.new(get_config)
+    return setmetatable({ players = {}, next_id = 0, get_config = get_config }, AIPlayerManager)
 end
 
 function AIPlayerManager:SpawnOne(index, api_key)
@@ -74,8 +74,8 @@ function AIPlayerManager:SpawnOne(index, api_key)
     inst:AddTag("companion")
     inst._ai_index = index
     inst._ai_provider = Provider.new(
-        safe_config("api_base_url", "https://api.openai.com/v1"),
-        safe_config("model", "gpt-4o-mini"),
+        safe_config(self, "api_base_url", "https://api.openai.com/v1"),
+        safe_config(self, "model", "gpt-4o-mini"),
         api_key
     )
     inst._ai_busy = false
@@ -142,11 +142,11 @@ function AIPlayerManager:Think(inst)
 end
 
 function AIPlayerManager:Start()
-    local count = clamp_count(safe_config("ai_count", 0))
-    local think_interval = tonumber(safe_config("request_interval", DEFAULT_THINK_INTERVAL)) or DEFAULT_THINK_INTERVAL
+    local count = clamp_count(safe_config(self, "ai_count", 0))
+    local think_interval = tonumber(safe_config(self, "request_interval", DEFAULT_THINK_INTERVAL)) or DEFAULT_THINK_INTERVAL
     think_interval = math.max(15, think_interval)
     for index = 1, count do
-        self:SpawnOne(index, safe_config("ai_" .. tostring(index) .. "_api_key", ""))
+        self:SpawnOne(index, safe_config(self, "ai_" .. tostring(index) .. "_api_key", ""))
     end
 
     TheWorld:DoPeriodicTask(think_interval, function()

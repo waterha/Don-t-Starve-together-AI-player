@@ -32,6 +32,15 @@ class ChatIntegrationTest(unittest.TestCase):
             assert(not Dialogue.Observe(companion,clock).pending_message)
         ''')
 
+    def test_greeting_preserves_safe_follow_and_wander(self):
+        self.lua.execute('''
+            assert(manager:OnChat(human.userid,'玩家','你好',false))
+            assert(manager:ApplyAction(companion,{action='follow'}))
+            assert(companion._ai_mode=='follow')
+            assert(manager:ApplyAction(companion,{action='wander'}))
+            assert(companion._ai_mode=='autonomous')
+        ''')
+
     def test_private_unknown_ghost_and_bot_messages_are_ignored(self):
         self.lua.execute('''
             assert(not manager:OnChat(human.userid,'玩家','秘密',true))
@@ -98,7 +107,7 @@ class ChatIntegrationTest(unittest.TestCase):
             found={object}
             for _,action in ipairs({{action='attack',target=44},{action='ignite',target=44},
                 {action='craft',recipe='gunpowder'},{action='chop',target=44},
-                {action='build',recipe='wall_stone'},{action='follow'}}) do
+                {action='build',recipe='wall_stone'}}) do
                 assert(not manager:ApplyAction(companion,action))
             end
             assert(#pushed==0 and not survival_action and #moves==0)

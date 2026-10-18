@@ -358,7 +358,7 @@ local function permitted_advice(inst, action)
         return ADVICE_RECIPES[action.recipe or action.item or action.target] == true
     end
     if name == "eat" or name == "equip" or name == "gather" or name == "explore"
-        or name == "move" or name == "wait" then return true end
+        or name == "move" or name == "wait" or name == "follow" or name == "wander" then return true end
     if name == "chop" or name == "mine" then
         for _, target in ipairs(nearby(inst)) do
             if target.GUID == action.target_guid or target.GUID == action.target or target.prefab == action.target then

@@ -15,7 +15,9 @@ class ManagerConfigTest(unittest.TestCase):
                 assert(modname, "modname must be supplied manually")
                 return config[name]
             end
-            package.preload.ai_provider = function() return {} end
+            package.preload.ai_provider = function() return {new=function() return {} end} end
+            package.preload.ai_players_roster = function() return {Register=function() roster_registered=true end, Publish=function() end} end
+            package.preload.ai_survival = function() return {} end
             package.preload.json = function() return {} end
             GLOBAL = _G
             function AddSimPostInit(callback) on_sim_init = callback end
@@ -24,8 +26,9 @@ class ManagerConfigTest(unittest.TestCase):
         lua.globals().Manager = manager
         lua.execute('''
             function require(name)
-                assert(name == "ai_player_manager")
-                return Manager
+                if name == "ai_player_manager" then return Manager end
+                assert(name == "ai_players_roster")
+                return package.preload.ai_players_roster()
             end
             server_mod_env = setmetatable({
                 GLOBAL = GLOBAL,
@@ -34,7 +37,7 @@ class ManagerConfigTest(unittest.TestCase):
                 require = require,
             }, {__index=_G})
             spawned = {}
-            function Manager:SpawnOne(index, key) spawned[index] = key end
+            function Manager:BeginSelection(index) spawned[index] = self.keys[index] end
         ''')
         run_main = lua.eval("function(code) local fn=assert(loadstring(code)); setfenv(fn,server_mod_env); fn() end")
         # Mod loading precedes world initialization; TheWorld is deliberately nil.

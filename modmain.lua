@@ -1,5 +1,8 @@
 local get_config = GetModConfigData
 
+-- Network roster fields must be registered on clients and the server before world creation.
+require("ai_players_roster").Register(AddPrefabPostInit, AddClassPostConstruct)
+
 -- The world is created after modmain is loaded.
 AddSimPostInit(function()
     if GLOBAL.TheWorld.ismastersim then

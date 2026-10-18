@@ -14,8 +14,19 @@ class CompanionActionsTest(unittest.TestCase):
             requests, tasks, found, moves, pushed, spoken = {}, {}, {}, {}, {}, {}
             decode_count = 0
             package.preload.ai_provider = function() return {} end
+            package.preload.ai_players_roster = function() return {Publish=function() end} end
+            package.preload.ai_survival = function() return {
+                Observe=function() return {hunger={percent=.2}, inventory={twigs=3}} end,
+                Tick=function() return false end,
+                Apply=function(inst, action) survival_action=action; return true end,
+            } end
             package.preload.json = function()
-                return {decode=function(content)
+                return {encode=function(observation)
+                    assert(observation.inventory.twigs==3 and observation.hunger.percent==.2)
+                    assert(observation.position.x==13 and observation.phase=="day")
+                    observed_context=true
+                    return "encoded survival observation"
+                end, decode=function(content)
                     decode_count = decode_count + 1
                     assert(content == "fixture-say", "unexpected response fixture")
                     return {action="say", message="late response"}
@@ -110,54 +121,44 @@ class CompanionActionsTest(unittest.TestCase):
             local point=moves[1].point
             assert(point and point.y==2)
             assert(math.abs(point.x-13)<=4 and math.abs(point.z-37)<=4)
-            assert(companion._ai_mode=="wander")
+            assert(companion._ai_mode=="autonomous")
         ''')
 
-    def test_gather_pushes_pick_buffered_action(self):
+    def test_survival_commands_are_forwarded_to_survival_module(self):
         self.lua.execute('''
-            local plant=entity(14,2,37)
-            plant.prefab="berrybush"
-            plant.components.pickable={CanBePicked=function() return true end}
-            found={companion, plant}
-            manager:ApplyAction(companion, {action="gather", target="berrybush"})
-            assert(find_calls==1, "gather did not query nearby native entities")
-            assert(#pushed==1 and pushed[1].target==plant)
-            assert(pushed[1].action==ACTIONS.PICK and companion._ai_mode=="gather")
-            assert(#spoken==0, "gather must act, not just announce an intention")
+            for _,name in ipairs({"gather","eat","craft","equip","chop","mine"}) do
+                manager:ApplyAction(companion, {action=name, target="twigs", recipe="torch"})
+                assert(survival_action.action==name and survival_action.recipe=="torch")
+                assert(companion._ai_mode=="autonomous")
+            end
         ''')
 
-    def test_gather_pushes_pickup_buffered_action(self):
+    def test_attack_ignores_players_and_malformed_targets(self):
         self.lua.execute('''
-            local item=entity(14,2,37)
-            item.prefab="twigs"
-            item.components.inventoryitem={canbepickedup=true}
-            found={item}
-            manager:ApplyAction(companion, {action="gather", target="twigs"})
-            assert(find_calls==1 and #pushed==1)
-            assert(pushed[1].target==item and pushed[1].action==ACTIONS.PICKUP)
-        ''')
-
-    def test_gather_does_not_dispatch_unavailable_resource(self):
-        self.lua.execute('''
-            local plant=entity(14,2,37)
-            plant.prefab="berrybush"
-            plant.components.pickable={CanBePicked=function() return false end}
-            found={plant}
-            manager:ApplyAction(companion, {action="gather", target="berrybush"})
-            assert(find_calls==1 and #pushed==0)
+            human.prefab, human.GUID = "wilson", 41
+            human.tags.player, human.components.combat = true, {}
+            monster = entity(15, 2, 37, nil)
+            monster.prefab, monster.GUID, monster.components.combat = "spider", 42, {}
+            found = {human, monster}
+            manager:ApplyAction(companion, {action="attack", target="wilson"})
+            manager:ApplyAction(companion, {action="attack", target={prefab="spider"}})
+            assert(#pushed==0, "player or malformed target triggered an attack")
+            manager:ApplyAction(companion, {action="attack", target="42"})
+            assert(#pushed==1 and pushed[1].target==monster)
+            assert(find_calls and find_calls>=2)
         ''')
 
     def test_timeout_releases_busy_and_late_callback_cannot_affect_next_request(self):
         self.lua.execute('''
             companion._ai_mode="wander"
             manager:Think(companion)
-            assert(find_calls==1 and companion._ai_busy and #requests==1)
+            assert(observed_context and companion._ai_busy and #requests==1)
             assert(#tasks==1 and tasks[1].delay==60)
             manager:Think(companion)
             assert(#requests==1, "busy companion issued overlapping requests")
             tasks[1]:run()
             assert(not companion._ai_busy, "timeout left companion permanently busy")
-            assert(companion._ai_mode=="follow", "timeout did not restore local following")
+            assert(companion._ai_mode=="autonomous", "timeout did not restore autonomous survival")
             manager:Think(companion)
             assert(companion._ai_busy and #requests==2)
             requests[1]("fixture-say", nil)

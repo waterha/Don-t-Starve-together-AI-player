@@ -1,7 +1,7 @@
 name = "AI Players"
-description = "Adds up to five server-controlled AI companions backed by an OpenAI-compatible model API."
+description = "Adds up to five AI bots with player-list status, automatic character selection and basic autonomous survival."
 author = "waterha"
-version = "0.1.3"
+version = "0.2.0"
 ai_players_config_ui = true
 forumthread = ""
 api_version = 10
@@ -13,7 +13,7 @@ configuration_options = {
     {
         name = "ai_count",
         label = "AI player count",
-        hover = "Number of AI companions to spawn (0-5).",
+        hover = "Number of AI bots to list, select characters and enter after a human joins (0-5).",
         options = {
             { description = "0", data = 0 },
             { description = "1", data = 1 },

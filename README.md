@@ -1,6 +1,8 @@
 # AI Players for Don't Starve Together
 
-This repository contains a server-authoritative prototype Mod that can spawn up to five AI companions. Each companion can use a separate API key; keys may be repeated when several companions use the same model account.
+This server-authoritative mod adds up to five AI bots. When a human enters a new world or resumes an existing save with the mod enabled, bots appear as **[AI]** entries in the in-game player list, choose their own character through the configured model, enter the world and run basic autonomous survival actions. Each bot may use a separate API key; repeated keys are supported.
+
+These are mod-controlled bots. Their rows extend the in-game list; they are not separate Steam/WeGame connections, do not occupy authenticated client slots, and do not appear as connections in the external server browser.
 
 ## Configure in game
 
@@ -11,11 +13,11 @@ This repository contains a server-authoritative prototype Mod that can spawn up 
 5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible key count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible key fields.
 
 6. Start the API bridge on the computer running the world server. On Windows, double-click `tools/start_ai_bridge.cmd` and keep its console open; it needs Python 3 and no extra packages. Alternatively run `python tools/ai_http_bridge.py` (`python3` on Linux). It listens only at `http://127.0.0.1:17893`; check `http://127.0.0.1:17893/health` for `{"ok":true}`. A remote dedicated server needs its own bridge on that server.
-7. Enable **AI Players** in the world's **server mods**, start/resume the world, and enter with your character. Configured companions appear beside the first living human after entry, announce themselves, and follow locally. Loading only **AI Players Config** enables editing but does not spawn companions.
+7. Enable **AI Players** in the world's **server mods**, start/resume the world, and enter with your character. Open the in-game player list: each configured bot first shows **Selecting**, then its chosen character and **Alive** once it enters nearby. A dead bot shows **Dead**. Bots pursue their own food/material/light needs rather than following by default. Loading only **AI Players Config** enables editing but does not start bots. For an existing save, enable the server mod before resuming; no new world is required.
 
 The helper initializes the configuration UI in the frontend; a disabled server mod does not run its own frontend entry when its settings are opened. The helper also opens AI Players settings with the host configuration so changes from Installed Mods reach the server instead of going into a separate client-only configuration. Other mods retain their normal behavior. The main server mod must still be enabled for the hosted world to spawn companions. Dedicated servers can use the override example below without installing the client helper.
 
-**Request interval** is the delay in seconds between scheduled model calls for each AI (15, 30, or 60; default 30). At 30 seconds, five configured AIs make at most about 10 calls per minute after startup. An AI with a request still in flight skips that tick. This controls decision frequency and API usage, not game frame rate or movement speed.
+**Request interval** is the delay in seconds between scheduled action decisions for each AI (15, 30, or 60; default 30). At 30 seconds, five active bots make at most about 10 scheduled calls per minute. Startup additionally makes one character-selection request and one initial action request per bot. A bot with an action request still in flight skips that tick. This controls model decision frequency and API usage; the local survival loop runs every two seconds independently.
 
 ## API key storage
 
@@ -53,23 +55,24 @@ return {
 
 Use your actual local mod folder name as the entry key. After publishing to Workshop, replace it with `workshop-` followed by the actual Workshop ID.
 
-## Current prototype behavior
+## Bot lifecycle and current behavior
 
-- Server reads and clamps the requested count to 0-5.
-- The surface server waits for a living human to enter, then spawns the configured Wilson-based companions nearby. Cave shards do not create a duplicate group. Companions are recreated per world session rather than saved as orphan player entities.
-- They are physical server-controlled companions, not separate Steam/WeGame clients. They do not join the network player roster or consume authenticated player accounts. They do not migrate with you into caves.
-- Local follow updates run every second, independently of the model interval. If the model request fails or times out, companions return to local follow.
-- Every companion periodically sends position, phase and nearby prefab names to the configured model through the local bridge. The bridge adds the API's Authorization header; native DST POST uses the demonstrated four-argument `QueryServer` form.
-- The model returns JSON with one action: `follow`, `wander`, `say`, `attack`, `gather`, or `wait`. Gathering dispatches PICK for ready plants or PICKUP for loose items. This does not implement full autonomous survival, crafting, tool use or base building.
-- The bridge accepts a provider root, `/v1` prefix or full `/chat/completions` endpoint. A root URL gains `/v1/chat/completions`; other API prefixes gain `/chat/completions`.
-- Invalid responses and HTTP failures are logged without stopping simulation. In-flight requests time out so later requests are not blocked indefinitely.
-- Requests are scheduled at the configured interval, with a minimum of 15 seconds.
+- The surface server clamps the configured count to 0-5 and starts after the first living human enters. The same path handles a new world and enabling the mod before resuming an existing save.
+- Each configured key creates an **[AI] AI N** player-list row in **Selecting** state. The model chooses independently from supported base characters. After selection, the character spawns on safe ground near the human and the row changes to **Alive**. Duplicate human/bot join events do not create duplicate bots. Missing keys skip their bot.
+- If selection fails, returns an unsupported character or exceeds 60 seconds, a supported default character is used. This fallback is logged. A disconnected human delays entry until a human returns. There is no requirement to run or click through an additional real client's character-selection screen.
+- The model receives health, hunger, sanity, inventory counts, equipment, nearby usable resources and GUIDs, threats, light, phase and available item recipes. It can request gathering, eating, item crafting/equipping, chopping/mining with owned tools, wandering, speech, waiting, following or attacking non-player targets.
+- The local two-second survival loop avoids imminent attackers, eats suitable owned food when hungry, gathers food and bounded grass/twig supplies, and crafts/equips a torch using actual ingredients. Pending movement/work and busy stategraph actions are preserved. Bots have no free supplies, health or invincibility. Model failures leave this local behavior running.
+- Bot rows use normal scrolling and show status and character. They have no real-client profile, mute, kick, ban or account actions. They do not alter the network client table or authenticated player count.
+- Bots use native character prefabs, which participate in some native player gameplay systems even without client identities. This is still an early bot implementation, not a complete player replacement.
+- Death is shown as **Dead**; automatic resurrection is not implemented. Bots and their inventories are recreated each world session, rather than persisted as authenticated player sessions. They do not migrate into caves, and the player-list snapshot is currently replicated within the surface shard only.
+- Crafting currently supports known non-placement item recipes, such as torches, axes and pickaxes. Base-building placement, advanced pathfinding, seasons/boss strategies and reliable long-term autonomous survival are not implemented.
+- The bridge accepts a provider root, `/v1` prefix or full `/chat/completions` endpoint. A root URL gains `/v1/chat/completions`; other API prefixes gain `/chat/completions`. The bridge adds Authorization; native DST POST uses its supported four-argument `QueryServer` form.
 
-This is an early implementation. DST's player prefab and HTTP callback behavior vary between game builds, so test it on a dedicated server and inspect `server_log.txt` before using it in an existing world.
+The Lua regression suite covers entry, independent character selection, list replication, local actions and request failures. Native-engine smoke testing in an isolated offline WeGame runtime was blocked before Lua initialization by Rail (`Please make sure the TGP is running!`, result 2). Actual game rendering, remote replication and long-running survival have not been validated.
 
 ## Tests
 
-The configuration regressions use Lua 5.1 through `lupa`. Point `DST_SCRIPTS_ZIP` to your installed game's `data/databundles/scripts.zip` to exercise its native configuration screen; game source is not included in this repository. The UI test explicitly skips if that resource is unavailable.
+The regressions use Lua 5.1 through `lupa`. Point `DST_SCRIPTS_ZIP` to your installed game's `data/databundles/scripts.zip` to exercise its actual configuration and player-list screen Lua with mocked engine/widgets; game source is not included in this repository. Native-screen tests explicitly skip if that resource is unavailable. HTTP tests run the real local bridge against fixture upstream servers, without paid model calls.
 
 ```powershell
 python -m pip install lupa

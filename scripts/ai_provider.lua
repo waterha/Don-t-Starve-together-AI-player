@@ -16,7 +16,7 @@ function Provider:IsConfigured()
     return type(self.api_key) == "string" and self.api_key ~= ""
 end
 
-function Provider:Complete(messages, callback)
+function Provider:Complete(messages, callback, max_tokens)
     if not self:IsConfigured() then
         callback(nil, "missing API key")
         return
@@ -36,7 +36,7 @@ function Provider:Complete(messages, callback)
         model = self.model,
         messages = messages,
         temperature = 0.2,
-        max_tokens = 160,
+        max_tokens = max_tokens == 320 and 320 or 160,
         response_format = { type = "json_object" },
     })
     local ok = pcall(function()

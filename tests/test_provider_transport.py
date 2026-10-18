@@ -51,6 +51,18 @@ class ProviderTransportTest(unittest.TestCase):
             assert(completed==1)
         ''')
 
+    def test_dialogue_budget_is_explicit_and_bounded(self):
+        lua = self.runtime()
+        lua.execute('''
+            local p=Provider.new(nil,nil,"fixture-key")
+            p:Complete({},done)
+            assert(encoded.max_tokens==160)
+            p:Complete({},done,320)
+            assert(encoded.max_tokens==320)
+            p:Complete({},done,100000)
+            assert(encoded.max_tokens==160)
+        ''')
+
     def test_missing_key_does_not_send_request(self):
         lua = self.runtime()
         lua.execute('Provider.new(nil,nil,""):Complete({},done); assert(calls==0 and result==nil and failure=="missing API key")')

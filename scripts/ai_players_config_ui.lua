@@ -4,25 +4,74 @@ local ConfigUI = {}
 local registered_mods = {}
 local hook_installed = false
 
-local function is_key(name)
-    return name:match("^ai_[1-5]_api_key$") ~= nil
+local function key_index(name)
+    return tonumber(name:match("^ai_([1-5])_api_key$"))
 end
 
 local function is_text_option(name)
-    return is_key(name) or name == "api_base_url" or name == "model"
+    return key_index(name) ~= nil or name == "api_base_url" or name == "model"
 end
 
 local function configure_screen(screen)
+    if screen.ai_players_configured then
+        return
+    end
+    screen.ai_players_configured = true
     local list = screen.options_scroll_list
     local apply_data = list.update_fn
+    local refresh_view = list.RefreshView
+    local displayed_count
+
+    -- Keep the complete option list for Apply/Reset. Filter only the displayed
+    -- rows so reducing the AI count does not discard previously entered keys.
+    list.RefreshView = function(self, ...)
+        local count = 0
+        for _, data in ipairs(screen.optionwidgets) do
+            if data.option.name == "ai_count" then
+                count = math.max(0, math.min(5, tonumber(data.selected_value) or 0))
+                break
+            end
+        end
+        if displayed_count ~= count then
+            displayed_count = count
+            local visible = {}
+            for _, data in ipairs(screen.optionwidgets) do
+                local index = key_index(data.option.name)
+                if index == nil or index <= count then
+                    table.insert(visible, data)
+                end
+            end
+            -- Native SetItemsData calls RefreshView again; the count is already
+            -- recorded, so that call renders without recursing into filtering.
+            self:SetItemsData(visible)
+            return
+        end
+        return refresh_view(self, ...)
+    end
 
     list.update_fn = function(context, widget, data, index)
-        -- Rows are recycled by TrueScrollList. Stop editing before rebinding.
         if widget.ai_text_entry and widget.ai_option_data ~= data then
             widget.ai_text_entry.textbox:SetEditing(false)
         end
         apply_data(context, widget, data, index)
         widget.ai_option_data = nil
+
+        -- Native callbacks address options by row index. Filtering changes that
+        -- index, so use the bound option instead (also for the interval spinner).
+        widget.opt.spinner.OnChanged = function(spinner, value)
+            local bound = widget.opt.data
+            if not bound then
+                return
+            end
+            bound.option.value = value
+            bound.selected_value = value
+            spinner:SetHasModification(value ~= bound.initial_value)
+            widget:ApplyDescription()
+            screen:MakeDirty()
+            if bound.option.name == "ai_count" then
+                list:RefreshView()
+            end
+        end
 
         if not data or not is_text_option(data.option.name) then
             if widget.ai_text_entry then
@@ -55,7 +104,6 @@ local function configure_screen(screen)
                 end
             end
 
-            -- OnTextInput covers typing/paste; OnTextInputted covers deletion.
             local on_text_input = entry.textbox.OnTextInput
             entry.textbox.OnTextInput = function(textbox, ...)
                 local handled, overflow = on_text_input(textbox, ...)
@@ -75,8 +123,7 @@ local function configure_screen(screen)
         widget.opt.spinner:Hide()
         local entry = widget.ai_text_entry
         entry:Show()
-        entry.textbox:SetPassword(is_key(data.option.name))
-        -- Avoid resetting the cursor when the scroller refreshes the same row.
+        entry.textbox:SetPassword(key_index(data.option.name) ~= nil)
         local value = data.selected_value or ""
         if entry.textbox:GetString() ~= value then
             entry.textbox:SetString(value)

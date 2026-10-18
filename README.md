@@ -4,13 +4,13 @@ This repository contains a server-authoritative prototype Mod that can spawn up 
 
 ## Configure in game
 
-1. Enable **AI Players** in the server mods list before opening its configuration screen. If updating an already running game, restart it once to reload the frontend hook.
-2. Set **AI player count** to 0-5.
-3. Click each **AI N API key** text box and type or paste the key. The characters are masked. A key can be repeated for multiple companions.
+1. Install the main mod as usual. For editable settings in the **Installed Mods** menu before the server mod is enabled, copy the contents of `client_config_helper` to a separate sibling folder, `mods/ai_players_config`, enable **AI Players Config** as a client mod, and restart once. The helper must be a separate mod, not a nested folder inside AI Players. Local development installs may instead add `ForceEnableMod("ai_players_config")` to the game's `mods/modsettings.lua`; remove that line to stop automatically loading the helper.
+2. Open **AI Players** configuration and set **AI player count** to 0-5. Exactly that many API key input boxes appear immediately; at zero, none appear.
+3. Click each **AI N API key** text box and type or paste the key. Characters are masked. Keys may be repeated. Reducing the count hides unused key fields and preserves their values for later reuse.
 4. Edit **API base URL** and **Model** to match your OpenAI-compatible provider.
-5. Click **Apply** to save using DST's normal host configuration. Reopening the screen preserves the values. **Back** discards pending edits; **Reset** restores the defaults.
+5. Click **Apply** to save using DST's normal host configuration. Reopening preserves the values and visible key count. **Back** discards pending edits; **Reset** restores defaults, including count zero and no visible key fields.
 
-The mod extends DST's configuration screen only for its own text fields. Count and request interval remain normal dropdowns. Dedicated servers can still use the override example below.
+The helper initializes the configuration UI in the frontend; a disabled server mod does not run its own frontend entry when its settings are opened. The helper also opens AI Players settings with the host configuration so changes from Installed Mods reach the server instead of going into a separate client-only configuration. Other mods retain their normal behavior. The main server mod must still be enabled for the hosted world to spawn companions. Dedicated servers can use the override example below without installing the client helper.
 
 **Request interval** is the delay in seconds between scheduled model calls for each AI (15, 30, or 60; default 30). At 30 seconds, five configured AIs make at most about 10 calls per minute after startup. An AI with a request still in flight skips that tick. This controls decision frequency and API usage, not game frame rate or movement speed.
 

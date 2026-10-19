@@ -75,6 +75,52 @@ class ProviderBridgeIntegrationTest(unittest.TestCase):
                                   "temperature": 0.2, "max_tokens": 160,
                                   "response_format": {"type": "json_object"}})
 
+    def test_multiple_lua_providers_forward_only_their_own_credentials(self):
+        lua = LuaRuntime(unpack_returned_tuples=True)
+
+        def from_lua(value):
+            if lua_type(value) != "table":
+                return value
+            keys = list(value.keys())
+            if keys and all(isinstance(key, int) for key in keys):
+                return [from_lua(value[index]) for index in range(1, len(keys) + 1)]
+            return {key: from_lua(value[key]) for key in keys}
+
+        def to_lua(value):
+            if isinstance(value, dict):
+                return lua.table_from({key: to_lua(item) for key, item in value.items()})
+            if isinstance(value, list):
+                return lua.table_from([to_lua(item) for item in value])
+            return value
+
+        lua.globals().encode_json = lambda value: json.dumps(from_lua(value))
+        lua.globals().decode_json = lambda value: to_lua(json.loads(value))
+        lua.execute('package.preload.json = function() return {encode_compliant=encode_json, decode=decode_json} end')
+        forwarded = []
+
+        def query_server(_self, url, callback, method, body):
+            self.assertEqual(url, "http://127.0.0.1:17893/complete")
+            connection = http.client.HTTPConnection("127.0.0.1", self.local.server_port, timeout=3)
+            try:
+                connection.request(method, "/complete", body.encode("utf-8"))
+                response = connection.getresponse()
+                content = response.read().decode("utf-8")
+                callback(content, response.status == 200, response.status)
+            finally:
+                connection.close()
+
+        lua.globals().TheSim = lua.table_from({"QueryServer": query_server})
+        provider = lua.execute((ROOT / "scripts" / "ai_provider.lua").read_text(encoding="utf-8"))
+        first = provider.new(self.base_url, "model-one", "slot-one-key", "chat_completions")
+        second = provider.new(self.base_url, "model-two", "slot-two-key", "chat_completions")
+        messages = to_lua([{"role": "user", "content": "fixture"}])
+        for instance in (first, second, first):
+            instance.Complete(instance, messages, lambda *_: None)
+            forwarded.append(self.upstream.received[-1][1]["Authorization"])
+        self.assertEqual(forwarded, ["Bearer slot-one-key", "Bearer slot-two-key", "Bearer slot-one-key"])
+        self.assertEqual([entry[2]["model"] for entry in self.upstream.received[-3:]],
+                         ["model-one", "model-two", "model-one"])
+
     def test_lua_complete_receives_sanitized_bridge_error(self):
         self.upstream.reply_status = 401
         self.upstream.reply_body = b'private upstream detail fixture-key'

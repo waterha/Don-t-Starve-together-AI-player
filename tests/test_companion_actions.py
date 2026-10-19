@@ -189,6 +189,51 @@ class CompanionActionsTest(unittest.TestCase):
             assert(not survival_action and not companion._ai_pending_action)
         ''')
 
+    def test_model_goal_feedback_and_wait_are_preserved_without_local_planner(self):
+        self.lua.execute('''
+            companion._ai_mode="autonomous"
+            local survival=require("ai_survival")
+            survival.Tick=function() error("legacy survival selected a goal") end
+            require("ai_progression").Tick=function() error("local progression overrode the model") end
+            require("json").decode=function() return {goal="Explore coast",action="wait"} end
+            manager:Think(companion); requests[1]("fixture",nil)
+            assert(companion._ai_goal=="Explore coast" and stopped)
+            assert(companion._ai_feedback.status=="dispatched")
+            stopped=false
+            for i=1,20 do clock=clock+.25; manager:UpdateLocal(companion) end
+            assert(not survival_action and #moves==0, "wait was replaced by local gathering/exploration")
+            require("json").encode=function(obs)
+                assert(obs.autonomy.goal=="Explore coast" and obs.autonomy.feedback.action=="wait")
+                return "fixture"
+            end
+            manager:Think(companion)
+        ''')
+
+    def test_model_exploration_coordinates_are_validated(self):
+        self.lua.execute('''
+            TheWorld.Map={IsPassableAtPoint=function() return true end,IsGroundTargetBlocked=function() return false end}
+            assert(manager:ApplyAction(companion,{action="explore",x=23,z=47}))
+            assert(moves[1].point.x==23 and moves[1].point.z==47)
+            assert(not manager:ApplyAction(companion,{action="explore",x=10000,z=47}))
+            assert(not manager:ApplyAction(companion,{action="explore",x=0/0,z=47}))
+            assert(#moves==1)
+            TheWorld.Map.IsPassableAtPoint=function() return false end
+            assert(not manager:ApplyAction(companion,{action="explore",x=23,z=47}))
+        ''')
+
+    def test_only_emergency_can_preempt_a_queued_model_action(self):
+        self.lua.execute('''
+            companion._ai_mode="autonomous"
+            local survival=require("ai_survival")
+            survival.EmergencyTick=function() return true end
+            companion._ai_pending_action={action={action="gather",target="twigs"},expires=10}
+            manager:UpdateLocal(companion)
+            assert(not survival_action and companion._ai_pending_action)
+            survival.EmergencyTick=function() return false end
+            manager:UpdateLocal(companion)
+            assert(survival_action.target=="twigs")
+        ''')
+
     def test_timeout_releases_busy_and_late_callback_cannot_affect_next_request(self):
         self.lua.execute('''
             companion._ai_mode="wander"

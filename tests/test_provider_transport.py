@@ -42,6 +42,19 @@ class ProviderTransportTest(unittest.TestCase):
             assert(encoded.model=="fixture-model" and encoded.messages[1].content=="follow")
         ''')
 
+    def test_multiple_provider_instances_keep_keys_isolated(self):
+        lua = self.runtime()
+        lua.execute('''
+            local first=Provider.new("https://relay-one.invalid/v1", "model-one", "first-secret", "responses")
+            local second=Provider.new("https://relay-two.invalid/v1", "model-two", "second-secret", "responses")
+            first:Complete({},done)
+            assert(encoded.api_key=="first-secret" and encoded.base_url=="https://relay-one.invalid/v1")
+            second:Complete({},done)
+            assert(encoded.api_key=="second-secret" and encoded.base_url=="https://relay-two.invalid/v1")
+            first:Complete({},done)
+            assert(encoded.api_key=="first-secret" and encoded.model=="model-one")
+        ''')
+
     def test_responses_format_is_carried_to_bridge(self):
         lua = self.runtime()
         lua.execute('''

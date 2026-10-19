@@ -186,6 +186,17 @@ class SurvivalTest(unittest.TestCase):
             assert(not Survival.Apply(bot,{action='equip',item='torch'}))
         ''')
 
+    def test_emergency_seam_does_not_restock_or_eat_at_normal_hunger(self):
+        self.run_lua('''
+            found={plant('grass','cutgrass'),loose('twigs'),plant('berrybush','berries')}
+            owned={food('berries')}
+            bot.components.hunger.current=50
+            assert(not Survival.EmergencyTick(bot) and #pushed==0)
+            assert(not Survival.Continue(bot) and #pushed==0)
+            bot.components.hunger.current=1
+            assert(Survival.EmergencyTick(bot) and pushed[1].action==ACTIONS.EAT)
+        ''')
+
     def test_collects_torch_materials_and_caps_supplies(self):
         self.run_lua('''
             TheWorld.state.phase='dusk'

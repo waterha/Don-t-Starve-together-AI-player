@@ -285,6 +285,8 @@ class ChatIntegrationTest(unittest.TestCase):
     def test_persistent_stall_asks_without_extra_model_calls(self):
         self.lua.execute('''
             companion._ai_mode='autonomous'
+            companion._ai_goal='寻找金矿'
+            companion._ai_feedback={status='rejected'}
             require('ai_survival').Observe=function() return {inventory={cutgrass=4,twigs=4},nearby={},recipes={}} end
             manager:UpdateLocal(companion)
             clock=46

@@ -219,7 +219,8 @@ function Survival.Observe(inst)
         observation.equipment[tostring(slot)] = item.prefab
     end
     for _, target in ipairs(nearby(inst)) do
-        local descriptor = {guid = target.GUID, prefab = target.prefab,
+        local tx, ty, tz = target.Transform:GetWorldPosition()
+        local descriptor = {guid = target.GUID, prefab = target.prefab, x = tx, y = ty, z = tz,
             distance = math.sqrt(inst:GetDistanceSqToInst(target)), actions = {}}
         if BUILDINGS[target.prefab] and safe_resource(target) then
             local tx, ty, tz = target.Transform:GetWorldPosition()
@@ -343,7 +344,7 @@ function Survival.CanDevelop(inst)
     return true
 end
 
-function Survival.Tick(inst, skip_work)
+local function tick(inst, skip_work, emergency_only)
     if not valid(inst) or busy(inst) or inst.components.locomotor == nil then return false end
     if inst.components.health ~= nil and inst.components.health:IsDead() then
         inst._ai_survival_work = nil
@@ -383,13 +384,14 @@ function Survival.Tick(inst, skip_work)
         if prepare_light() then return true end
     end
     local hunger = inst.components.hunger
-    if hunger ~= nil and hunger:GetPercent() < .6 then
+    if hunger ~= nil and hunger:GetPercent() < (emergency_only and .15 or .6) then
         local food = find_item(inst, nil, edible)
         if food ~= nil then
             inst._ai_survival_work = nil
             return push(inst, nil, ACTIONS.EAT, food)
         end
     end
+    if emergency_only then return false end
     local counts = count_inventory(inst)
     if (counts.cutgrass or 0) < 4 or (counts.twigs or 0) < 4 then
         if gather_for(inst, entities, function(product)
@@ -415,6 +417,25 @@ function Survival.Tick(inst, skip_work)
         inst._ai_survival_work = nil
     end
     return false
+end
+
+function Survival.EmergencyTick(inst)
+    return tick(inst, true, true)
+end
+
+function Survival.Continue(inst)
+    if not valid(inst) or busy(inst) or inst.components.locomotor == nil then return false end
+    if inst.components.health and inst.components.health:IsDead() then inst._ai_survival_work = nil; return false end
+    local intent = work_intent(inst)
+    if not intent then return false end
+    if push(inst, intent.target, intent.action, intent.tool) then return true end
+    inst._ai_survival_work = nil
+    return false
+end
+
+-- Retained for legacy fixtures; the runtime manager uses only the two seams above.
+function Survival.Tick(inst, skip_work)
+    return tick(inst, skip_work, false)
 end
 
 return Survival

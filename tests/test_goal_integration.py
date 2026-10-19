@@ -8,7 +8,7 @@ from tests import test_survival as survival_fixture
 
 
 class GoalIntegrationTest(unittest.TestCase):
-    def test_local_goal_dispatches_during_inflight_model_and_retains_goal(self):
+    def test_local_loop_does_not_choose_goals_during_inflight_model(self):
         fixture = actions_fixture.CompanionActionsTest()
         fixture.setUp()
         fixture.lua.execute('''
@@ -16,18 +16,13 @@ class GoalIntegrationTest(unittest.TestCase):
             survival.Observe=function() return {inventory={cutgrass=4,twigs=4,flint=1},
                 craftable={'axe'}, nearby={}, recipes={}} end
             companion._ai_mode, companion._ai_busy='autonomous',true
+            companion._ai_goal='Explore the coast'
+            for i=1,10 do clock=i; manager:UpdateLocal(companion) end
+            assert(survival_action==nil, 'local route must not craft an axe while the model chooses exploration')
+            assert(companion._ai_goal=='Explore the coast' and #requests==0)
+            survival.EmergencyTick=function() survival_action={action='eat'}; return true end
             manager:UpdateLocal(companion)
-            assert(survival_action.action=='craft' and survival_action.recipe=='axe')
-            assert(companion._ai_progression.goal=='axe')
-            assert(companion._ai_progression.last_action.dispatched)
-            assert(#requests==0, 'goal decisions must not generate extra API requests')
-            survival_action=nil
-            manager:UpdateLocal(companion)
-            assert(survival_action==nil, 'goal planning must be throttled separately from safety')
-            clock=1
-            survival.CanDevelop=function() return false end
-            manager:UpdateLocal(companion)
-            assert(survival_action==nil, 'development must not preempt safety')
+            assert(survival_action.action=='eat', 'immediate survival must still run while HTTP is pending')
         ''')
 
     def test_exploration_holds_destination_then_tries_unvisited_direction(self):

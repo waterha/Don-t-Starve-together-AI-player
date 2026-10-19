@@ -226,7 +226,7 @@ class BotLifecycleTest(unittest.TestCase):
         lua = self.runtime(existing_human=True)
         lua.execute('''
             assert(periodics[.25], "local reaction must be checked within 250ms")
-            assert(periodics[30], "default API usage must not increase")
+            assert(periodics[.5], "request scheduling must be event driven, not one coarse period")
             advance(2); requests[1].callback('{"character":"wilson"}',nil)
             advance(1); assert(#requests==2 and spawned[1]._ai_busy)
             local updates=0
@@ -235,7 +235,7 @@ class BotLifecycleTest(unittest.TestCase):
             assert(updates==4 and #requests==2, "local loop waited for model or generated extra API calls")
             config.request_interval=5
             manager:Start()
-            assert(periodics[5], "fast model setting was clamped back to 15s")
+            assert(periodics[.5], "fast model setting must still be driven by the local scheduler")
         ''')
 
     def test_lists_before_selection_then_enters_chosen_character(self):
@@ -342,6 +342,8 @@ class BotLifecycleTest(unittest.TestCase):
             assert(requests[1].base=="https://direct.example/v1" and requests[1].model=="direct-model")
             assert(requests[1].key=="direct-key")
             requests[1].callback('{}',nil)
+            -- The first decision already used the interval; a second request must wait for it.
+            advance(30)
             manager:Think(spawned[1]); assert(#requests==2)
             assert(requests[2].base=="https://direct.example/v1" and requests[2].model=="direct-model")
         ''')

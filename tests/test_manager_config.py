@@ -50,11 +50,12 @@ class ManagerConfigTest(unittest.TestCase):
                 ismastersim = true, ismastershard = true,
                 ListenForEvent = function() end,
                 DoTaskInTime = function(self, delay, callback) callback() end,
-                DoPeriodicTask = function(self, delay, callback) interval = delay end,
+                DoPeriodicTask = function(self, delay, callback) intervals[#intervals+1] = delay end,
             }
+            intervals = {}
             on_sim_init()
             assert(spawned[1] == config.ai_1_api_key and spawned[2] == config.ai_2_api_key)
-            assert(interval == 60)
+            assert(intervals[1] == .25 and intervals[2] == .5, "requests must be event driven")
             spawned = {}
             TheWorld.ismastersim = false
             on_sim_init()

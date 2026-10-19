@@ -301,7 +301,7 @@ class ConfigUIScreenTest(unittest.TestCase):
             setfenv(assert(loadstring(code)), env)()
             return env
         end''')((ROOT / "modinfo.lua").read_text(encoding="utf-8"))
-        self.assertEqual(metadata.version, "0.2.14")
+        self.assertEqual(metadata.version, "0.2.15")
         options = {option.name: option for option in metadata.configuration_options.values()}
         for index in range(1, 6):
             option = options[f"ai_{index}_api_format"]

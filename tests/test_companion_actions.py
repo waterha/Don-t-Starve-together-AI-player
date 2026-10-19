@@ -242,9 +242,16 @@ class CompanionActionsTest(unittest.TestCase):
             assert(#tasks==1 and tasks[1].delay==60)
             manager:Think(companion)
             assert(#requests==1, "busy companion issued overlapping requests")
+            -- The sixty-second timeout fires at t=60, not at the instant of dispatch.
+            clock=60
             tasks[1]:run()
             assert(not companion._ai_busy, "timeout left companion permanently busy")
             assert(companion._ai_mode=="autonomous", "timeout did not restore autonomous survival")
+            -- A timed-out request applies transient backoff before the next attempt.
+            clock=64.999
+            manager:Think(companion)
+            assert(#requests==1, "transient backoff must delay the retry")
+            clock=65
             manager:Think(companion)
             assert(companion._ai_busy and #requests==2)
             requests[1]("fixture-say", nil)

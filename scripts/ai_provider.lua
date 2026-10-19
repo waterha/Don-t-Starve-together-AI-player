@@ -23,10 +23,12 @@ function Provider:Complete(messages, callback, max_tokens)
         return
     end
     local finished = false
-    local function finish(content, err)
+    local function finish(content, err, retry_after)
         if not finished then
             finished = true
-            callback(content, err)
+            -- Keep the historical two-argument callback for ordinary replies.
+            if retry_after ~= nil then callback(content, err, retry_after)
+            else callback(content, err) end
         end
     end
     -- Native QueryServer's supported POST form has no headers table. The local
@@ -40,7 +42,7 @@ function Provider:Complete(messages, callback, max_tokens)
             model = self.model,
             messages = messages,
             temperature = 0.2,
-            max_tokens = self.api_format == "responses" and 2048 or (max_tokens == 320 and 320 or 160),
+            max_tokens = self.api_format == "responses" and 2048 or (max_tokens == 768 and 768 or max_tokens == 320 and 320 or 160),
             response_format = { type = "json_object" },
         })
         -- The native compliant encoder still leaves some ASCII controls raw.
@@ -57,7 +59,9 @@ function Provider:Complete(messages, callback, max_tokens)
             local decoded_ok, decoded = pcall(json.decode, response or "")
             if decoded_ok and type(decoded) == "table" and decoded.error then
                 local message = type(decoded.error) == "table" and decoded.error.message or decoded.error
-                finish(nil, type(message) == "string" and message or "model API request failed")
+                local retry_after = type(decoded.error) == "table" and decoded.error.retry_after or nil
+                if type(retry_after) ~= "number" or retry_after ~= retry_after or retry_after < 0 then retry_after = nil end
+                finish(nil, type(message) == "string" and message or "model API request failed", retry_after)
                 return
             end
             if not success or (status ~= nil and status ~= 200) then

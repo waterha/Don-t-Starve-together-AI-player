@@ -1,7 +1,7 @@
 name = "AI Players"
 description = "Adds up to five AI bots with independent model providers, character selection and basic autonomous survival."
 author = "waterha"
-version = "0.2.14"
+version = "0.2.15"
 ai_players_config_ui = true
 forumthread = ""
 api_version = 10
@@ -146,7 +146,7 @@ configuration_options = {
     },
     {
         name = "request_interval", label = "Request interval",
-        hover = "Seconds between model requests per AI; 5/10 seconds use more API calls. Local actions update every 0.25 seconds independently. In-flight requests skip a tick.",
+        hover = "Minimum seconds between model requests per AI; decisions are also triggered by plan completion, failure, danger and chat. 5/10 seconds use more API calls. Local actions update every 0.25 seconds independently.",
         options = {
             { description = "5 seconds", data = 5 },
             { description = "10 seconds", data = 10 },

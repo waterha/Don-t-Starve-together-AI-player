@@ -61,8 +61,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             pass
 
-    def _error(self, status, message):
-        self._reply(status, json.dumps({"error": {"message": message}}).encode("utf-8"))
+    def _error(self, status, message, retry_after=None):
+        error = {"message": message}
+        if retry_after is not None:
+            error["retry_after"] = retry_after
+        self._reply(status, json.dumps({"error": error}).encode("utf-8"))
 
     def do_GET(self):
         if self.path == "/health":
@@ -146,8 +149,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
                 return
         except HTTPError as error:
             status = error.code
+            retry_after = None
+            if status == 429:
+                # Only a bounded numeric delay crosses into the game; no raw headers.
+                try:
+                    retry_after = max(15, min(300, int(error.headers.get("Retry-After", ""))))
+                except (ValueError, TypeError):
+                    pass
             error.close()
-            self._error(502, "upstream returned HTTP " + str(status))
+            self._error(502, "upstream returned HTTP " + str(status), retry_after)
             return
         except (ValueError, UnicodeError):
             self._error(502, "upstream returned invalid JSON")

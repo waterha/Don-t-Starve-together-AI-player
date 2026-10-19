@@ -23,9 +23,22 @@ These are mod-controlled bots. Their rows extend the in-game list; they are not 
 
 The helper initializes the configuration UI in the frontend; a disabled server mod does not run its own frontend entry when its settings are opened. The helper also opens AI Players settings with the host configuration so changes from Installed Mods reach the server instead of going into a separate client-only configuration. Other mods retain their normal behavior. The main server mod must still be enabled for the hosted world to spawn companions. Dedicated servers can use the override example below without installing the client helper.
 
-**Request interval** is the delay in seconds between scheduled action decisions for each AI (5, 10, 15, 30, or 60; default 30). At 30 seconds, five active bots make at most about 10 scheduled calls per minute; at 10 seconds about 30, and at 5 seconds about 60. Startup additionally makes one character-selection request and one initial action request per bot. A bot with an action request still in flight skips that tick. The default has not changed: faster local actions do not require more API calls.
+**Request interval** is the minimum delay in seconds between model decision requests for each AI (5, 10, 15, 30, or 60; default 30). At 30 seconds, five active bots make at most about 10 calls per minute; at 10 seconds about 30, and at 5 seconds about 60. Startup additionally makes one character-selection request and one initial action request per bot. A bot with a request still in flight skips that attempt. The default has not changed: faster local actions do not require more API calls.
 
 The local survival loop checks every **0.25 seconds**, independently of HTTP/model requests (previously 2 seconds). This reduces scheduling delay, not animation, pathfinding or provider latency. It resumes validated chopping/mining work between swings without another model request. A model command received while the bot is busy is kept for up to 10 seconds and revalidated when idle, with survival needs taking priority. Delayed wait/wander replies cannot stop existing buffered work. Autonomous goals are checked once per second; exploration retains its destination and rotates visited areas. Follow updates are limited to twice per second. Actual frame-time and end-to-end latency in a running game have not been measured.
+
+### Short plans executed locally (0.2.15)
+
+One model reply may contain a **1–5 step plan**; the executor advances it locally instead of waiting for a request per step:
+
+- Each dispatched step needs real evidence (inventory gained, work progress reaching zero, a structure appearing, equipment changing, actual arrival distance) before the next one runs. **Dispatch is never completion.**
+- Plan completion, plan failure, urgent survival and player chat request a new decision, but all remain under the hard interval and in-flight exclusivity, so call volume does not grow.
+- Chat has the highest priority and can interrupt a running plan, but keeps a 5-second floor and never overlaps an in-flight request.
+- An authentication failure such as `401` pauses that bot's requests until the configuration is rebuilt; `429` honors the provider `Retry-After` and repeated failures only lengthen the cooldown.
+- Logs record only timing numbers, never keys or conversation: `timing dispatch_ms=…`, `timing schedule_wait_ms=… reason=…`.
+- A new plan supersedes the old one and clears its stale work binding, so two steps cannot run at once.
+
+Short plans only speed up action chaining; they **do not** replace model-led decisions, and first-reply chat latency still depends on the chosen model and provider.
 
 The bridge also reports invalid configuration by field (`invalid base_url`, `invalid api_key`, `invalid model`, or `invalid messages`) without echoing submitted values. Leading/trailing whitespace on URL, key and model is removed; internal key control characters remain rejected. Repeated validation errors mean requests are failing, not merely responding slowly. Check configuration before selecting a shorter interval.
 
@@ -43,13 +56,13 @@ Version 0.2.7 fixes the mismatch between DST's private `json.encode` and standar
 
 `model selected character willow` confirms a model choice. `character selection failed (...); fallback wilson` records fallback with a fixed reason for configuration/API errors, timeout, invalid JSON, or an unavailable character. Logs include no keys or response bodies. The model may still legitimately choose Wilson; this fix does not force randomized characters. Unavailable APIs retain a safe fallback, and gathering alone does not prove connectivity because local planning works independently.
 
-## Model-led autonomous play (0.2.14)
+## Model-led autonomous play (0.2.15)
 
 Each bot's model chooses its goals, resource use, exploration routes and development strategy. The previous fixed axe/pickaxe/science-machine/backpack planner no longer runs in the manager. Local code does not change goals because materials happen to be available, or gather while the model has chosen to wait. Starter knowledge remains advisory.
 
 Each request includes the model's previous goal, dispatch feedback, inventory/equipment, recipes and technology gates, nearby resources/structures, position and exploration memory. The model can return `goal` and `explore`, optionally with legal nearby coordinates; without coordinates the executor selects a less visited direction. Other supported actions include gathering, eating, crafting, building, equipping, chopping, mining, approaching science stations, waiting and optional following. Dispatch is not completion: later observations must confirm results.
 
-The 0.25-second local loop executes existing intentions and handles immediate threats, actual darkness and critical hunger. It continues model-selected chopping/mining but does not independently restock normal materials or advance technology. With an unavailable API, only emergency protection, existing work and ghost resurrection remain; new strategic plans require the model. **Request interval** still controls model cadence (default 30 seconds). Choose 5–10 seconds manually for more frequent decisions at increased API usage. This release adds no automatic calls or failure retries.
+The 0.25-second local loop executes existing intentions and handles immediate threats, actual darkness and critical hunger. It continues model-selected chopping/mining but does not independently restock normal materials or advance technology. With an unavailable API, only emergency protection, existing work and ghost resurrection remain; new strategic plans require the model. Decisions are no longer fixed to one request every 30 seconds: plan completion, plan failure, urgent survival and player chat request a new decision, with **Request interval** as a hard ceiling (default 30 seconds, selectable 5–60). A running plan therefore never idles waiting for the next periodic tick, while request frequency still cannot exceed that interval. Choose 5–10 seconds manually for more frequent decisions at increased API usage.
 
 Science machines, campfires and fire pits use real materials, native terrain checks and reusable build buffers. Native character, technology, inventory and completion gates remain enforced. Exploration memory is bounded, not full-map navigation. See the [research notes](docs/survival-research.md) for evidence. Cooking, automatic fueling, complex combat and complete seasonal strategies remain unsupported; model decisions cannot create missing gameplay actions. Long-term survival is not guaranteed. Goals and inventories do not persist across sessions.
 

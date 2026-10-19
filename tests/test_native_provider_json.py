@@ -119,6 +119,14 @@ class NativeProviderJSONTest(unittest.TestCase):
                 for _, choice in ipairs(choices) do if value == choice then return value end end
             end
             Roster = {CleanName = function(value, index, fallback) return value or fallback end}
+            Policy = {New = function(interval)
+                return {interval = interval, inflight = false, blocked_auth = false, retry_at = 0,
+                    rate_failures = 0, transient_failures = 0,
+                    metrics = {requests = 0, model_duration_count = 0, model_duration_ms = 0,
+                        schedule_wait_count = 0, schedule_wait_ms = 0}}
+            end}
+            function Policy.Finish(state, now, err) state.inflight = false; state.blocked_auth = err ~= nil end
+            function GetTime() return 0 end
             function find_human() return nil end
             TheWorld = {DoTaskInTime = function() return {Cancel = function() end} end}
         ''')

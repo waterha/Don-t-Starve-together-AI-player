@@ -101,23 +101,24 @@ class ChatIntegrationTest(unittest.TestCase):
             assert(spoken[1]:find('Key',1,true) and spoken[1]:find('离线',1,true))
             assert(public[1]=='[AI '..companion.name..'] '..spoken[1])
             assert(Dialogue.Observe(companion,clock).pending_message.text=='hello there')
+            -- Authentication failures pause this bot instead of burning requests every interval.
             clock=8
             manager:UpdateLocal(companion)
-            assert(#requests==2)
-            requests[2](nil,'upstream returned HTTP 401')
+            assert(#requests==1,'authentication failure must pause further requests')
             assert(#spoken==1 and #public==1,'authentication notices must be rate limited')
             assert(Dialogue.Observe(companion,clock).pending_message)
             clock=60
             manager:UpdateLocal(companion)
-            assert(#requests==3)
-            requests[3](nil,'upstream returned HTTP 401')
-            assert(#spoken==2 and #public==2)
+            assert(#requests==1,'authentication pause must persist until configuration changes')
+            assert(#spoken==1 and #public==1)
+            -- A fresh world state (reloaded configuration) recovers the bot.
+            companion._ai_request_policy=nil
             clock=68
             manager:UpdateLocal(companion)
-            assert(#requests==4)
-            requests[4]('{}',nil)
-            assert(#spoken==3 and spoken[3]==response.message)
-            assert(#public==3 and public[3]=='[AI '..companion.name..'] '..response.message)
+            assert(#requests==2,'a new policy state must retry after reconfiguration')
+            requests[2]('{}',nil)
+            assert(#spoken==2 and spoken[2]==response.message)
+            assert(#public==2 and public[2]=='[AI '..companion.name..'] '..response.message)
             assert(not Dialogue.Observe(companion,clock).pending_message)
         ''')
 

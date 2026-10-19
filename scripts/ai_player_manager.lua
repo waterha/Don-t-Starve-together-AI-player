@@ -631,6 +631,12 @@ function AIPlayerManager:Think(inst, reason)
         local finished_at = GetTime()
         Policy.Finish(policy, finished_at, err, retry_after)
         inst._ai_busy = false
+        -- Authentication failure pauses further requests instead of retrying in a loop.
+        if policy.blocked_auth and not inst._ai_auth_pause_logged then
+            inst._ai_auth_pause_logged = true
+            print(string.format("[AI Players] AI %d model requests paused after an authentication failure; "
+                .. "fix the API key and restart the world", inst._ai_index))
+        end
         if not alive(inst) then Dialogue.End(inst, dialogue_token, nil, observation, finished_at); return end
         if err then
             Dialogue.End(inst, dialogue_token, nil, observation, finished_at)
